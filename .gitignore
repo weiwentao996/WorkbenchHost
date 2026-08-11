@@ -1,0 +1,20 @@
+# Build output
+WorkbenchHost.exe
+*.pdb
+*.dll
+bin/
+obj/
+
+# IDE and local metadata
+.vs/
+*.user
+*.suo
+*.userprefs
+
+# Machine-specific application profiles and launchers
+profiles/*.json
+Start Foxmail Workbench.cmd
+
+# Local workspace/session data
+workspace-state.json
+workspace-state.*
