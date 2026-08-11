@@ -11,9 +11,8 @@ obj/
 *.suo
 *.userprefs
 
-# Machine-specific application profiles and launchers
+# Machine-specific application profiles
 profiles/*.json
-Start Foxmail Workbench.cmd
 
 # Local workspace/session data
 workspace-state.json

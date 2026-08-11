@@ -12,11 +12,7 @@ WorkbenchHost is a standalone editor-style Windows host. It works with real file
 
 If `profiles` is empty, the host starts in editor-only mode. You can still open folders and edit files; use `File > Import Application...` to add the first adapter.
 
-To load one adapter only, start the host with its profile path:
-
-```bat
-WorkbenchHost.exe profiles\my-app.json
-```
+`Start Workbench.cmd` is the only launcher needed. At startup, the host automatically loads every valid `.json` profile under `profiles`. Add as many applications as needed and give each one a unique activation phrase; typing that phrase in the shared `db.go` selects and opens the corresponding application. Application-specific launch scripts are not required.
 
 ## Editor Features
 

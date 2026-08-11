@@ -12,11 +12,7 @@ WorkbenchHost 是一个独立运行的编辑器式 Windows 宿主。它使用真
 
 如果 `profiles` 为空，宿主会以纯编辑器模式启动。此时仍可以打开文件夹和编辑文件，使用 `File > Import Application...` 导入第一个适配器即可。
 
-如果只想加载一个适配器，可在启动时传入对应 profile：
-
-```bat
-WorkbenchHost.exe profiles\my-app.json
-```
+只需要 `Start Workbench.cmd` 这一个启动入口。宿主启动时会自动加载 `profiles` 下所有有效的 `.json` 配置；可以导入任意数量的程序，并为每个程序设置不同的激活关键词。在共用的 `db.go` 中输入对应关键词，即可选择并打开目标程序，不需要为 Foxmail 或其他程序单独编写启动脚本。
 
 ## 编辑器功能
 
