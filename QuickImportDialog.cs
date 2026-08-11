@@ -151,9 +151,9 @@ namespace WorkbenchHost
         private void ValidateInput(object sender, FormClosingEventArgs e)
         {
             if (DialogResult != DialogResult.OK) return;
-            if (String.IsNullOrWhiteSpace(displayName.Text) || String.IsNullOrWhiteSpace(activationPhrase.Text) || String.IsNullOrWhiteSpace(processName.Text))
+            if (String.IsNullOrWhiteSpace(displayName.Text) || String.IsNullOrWhiteSpace(activationPhrase.Text))
             {
-                MessageBox.Show("Display name, activation phrase, and process name are required.", "Import Application", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Display name and activation phrase are required.", "Import Application", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 e.Cancel = true;
             }
         }

@@ -30,8 +30,9 @@ namespace WorkbenchHost
             if (!File.Exists(executable)) throw new FileNotFoundException("Application executable not found.", executable);
             if (String.IsNullOrWhiteSpace(settings.DisplayName)) throw new InvalidDataException("Display name is required.");
             if (String.IsNullOrWhiteSpace(settings.ActivationPhrase)) throw new InvalidDataException("Activation phrase is required.");
-            if (String.IsNullOrWhiteSpace(settings.ProcessName)) throw new InvalidDataException("Process name is required.");
-            string processName = settings.ProcessName.Trim();
+            string processName = String.IsNullOrWhiteSpace(settings.ProcessName)
+                ? Path.GetFileNameWithoutExtension(executable)
+                : settings.ProcessName.Trim();
             if (processName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) processName = Path.GetFileNameWithoutExtension(processName);
 
             string profilesDirectory = Path.Combine(root, "profiles");

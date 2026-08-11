@@ -81,6 +81,8 @@ namespace WorkbenchHost
             if (String.IsNullOrWhiteSpace(DisplayName)) DisplayName = Id;
             if (String.IsNullOrWhiteSpace(WindowTitle)) WindowTitle = DisplayName + " - Code";
             if (String.IsNullOrWhiteSpace(WorkingDirectory)) WorkingDirectory = Path.GetDirectoryName(Executable);
+            if (String.IsNullOrWhiteSpace(ProcessName) && !String.IsNullOrWhiteSpace(Executable))
+                ProcessName = Path.GetFileNameWithoutExtension(Executable);
             if (Arguments == null) Arguments = String.Empty;
             if (LaunchTimeoutSeconds <= 0) LaunchTimeoutSeconds = 45;
             if (KillAfterMilliseconds <= 0) KillAfterMilliseconds = 1200;
@@ -112,7 +114,6 @@ namespace WorkbenchHost
             if (SchemaVersion != 1) throw new InvalidDataException("Unsupported profile schemaVersion: " + SchemaVersion);
             if (String.IsNullOrWhiteSpace(Id)) throw new InvalidDataException("Profile id is required.");
             if (String.IsNullOrWhiteSpace(Executable)) throw new InvalidDataException("Profile executable is required.");
-            if (String.IsNullOrWhiteSpace(ProcessName)) throw new InvalidDataException("Profile processName is required.");
 
             string executablePath = ResolveApplicationPath(Executable);
             if (!File.Exists(executablePath)) throw new FileNotFoundException("Configured executable not found.", executablePath);

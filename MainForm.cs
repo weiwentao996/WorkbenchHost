@@ -77,7 +77,9 @@ namespace WorkbenchHost
         private Process applicationProcess;
         private IntPtr applicationHandle = IntPtr.Zero;
         private long originalApplicationStyle;
+        private long originalApplicationOwner;
         private bool applicationEmbedded;
+        private bool applicationOverlay;
         private bool applicationViewVisible;
         private bool grayscaleApplied;
         private bool f10WasDown;
@@ -485,6 +487,8 @@ namespace WorkbenchHost
 
         private void BuildEvents()
         {
+            Move += delegate { ResizeApplication(); };
+            Resize += delegate { ResizeApplication(); };
             tree.AfterExpand += delegate(object sender, TreeViewEventArgs e)
             {
                 NodeTarget target = e.Node.Tag as NodeTarget;
@@ -530,7 +534,7 @@ namespace WorkbenchHost
             {
                 opacityLabel.Text = "OPACITY " + opacitySlider.Value + "%";
                 if (applicationEmbedded && NativeMethods.IsWindow(applicationHandle)) NativeMethods.SetOpacity(applicationHandle, opacitySlider.Value);
-                if (applicationViewVisible) encodingStatus.Text = "Runtime  Embedded  " + opacitySlider.Value + "%";
+                if (applicationViewVisible) encodingStatus.Text = "Runtime  " + ApplicationModeName() + "  " + opacitySlider.Value + "%";
             };
             grayscaleButton.CheckedChanged += delegate
             {
@@ -756,7 +760,7 @@ namespace WorkbenchHost
             applicationHost.Invalidate();
             applicationViewVisible = true;
             pathLabel.Text = "  " + profile.Id + " / " + Path.GetFileName(triggerPath);
-            encodingStatus.Text = "Runtime  Embedded  " + opacitySlider.Value + "%";
+            encodingStatus.Text = "Runtime  Auto  " + opacitySlider.Value + "%";
             statusText.Text = "Waiting for application window...";
 
             try
@@ -766,7 +770,10 @@ namespace WorkbenchHost
                 ResizeApplication();
                 NativeMethods.SetOpacity(applicationHandle, opacitySlider.Value);
                 ApplyGrayscaleState();
-                statusText.Text = "Application attached - F10 returns to code";
+                encodingStatus.Text = "Runtime  " + ApplicationModeName() + "  " + opacitySlider.Value + "%";
+                statusText.Text = applicationOverlay
+                    ? "Application attached in compatible overlay mode - F10 returns to code"
+                    : "Application embedded - F10 returns to code";
             }
             catch (Exception ex)
             {
@@ -786,6 +793,7 @@ namespace WorkbenchHost
             applicationProcess = null;
             applicationHandle = IntPtr.Zero;
             applicationEmbedded = false;
+            applicationOverlay = false;
             applicationViewVisible = false;
             grayscaleButton.Checked = false;
             ApplyGrayscaleState();
@@ -816,6 +824,7 @@ namespace WorkbenchHost
             if (applicationEmbedded && NativeMethods.IsWindow(applicationHandle)) return;
 
             ApplicationWindow candidate = profile.AttachExisting ? FindExistingApplicationWindow() : null;
+            HashSet<IntPtr> previousWindows = NativeMethods.SnapshotTopLevelWindows();
             if (candidate == null)
             {
                 ProcessStartInfo info = new ProcessStartInfo();
@@ -864,19 +873,41 @@ namespace WorkbenchHost
                         windowProcess = found.Process;
                     }
                 }
+                if (windowProcess == null)
+                {
+                    uint discoveredProcessId;
+                    IntPtr discovered = NativeMethods.FindNewTopLevelWindow(previousWindows, (uint)Process.GetCurrentProcess().Id, profile.WindowClass, out discoveredProcessId);
+                    if (discovered != IntPtr.Zero)
+                    {
+                        try
+                        {
+                            Process discoveredProcess = Process.GetProcessById((int)discoveredProcessId);
+                            if (applicationProcess != null && applicationProcess.Id != discoveredProcess.Id) applicationProcess.Dispose();
+                            applicationProcess = discoveredProcess;
+                            applicationHandle = discovered;
+                            windowProcess = discoveredProcess;
+                            WriteOutput("Automatically selected window from process " + discoveredProcess.ProcessName + " (PID " + discoveredProcess.Id + ").");
+                        }
+                        catch { }
+                    }
+                }
                 if (windowProcess != null) break;
-                if (applicationProcess != null && applicationProcess.HasExited)
-                    throw new InvalidOperationException("Application process exited before creating a window.");
                 Application.DoEvents();
                 Thread.Sleep(100);
             }
             if (applicationHandle == IntPtr.Zero) throw new TimeoutException("Application window was not available within " + profile.LaunchTimeoutSeconds + " seconds.");
 
-            originalApplicationStyle = NativeMethods.Embed(applicationHandle, applicationHost.Handle);
+            originalApplicationOwner = NativeMethods.GetStyle(applicationHandle, NativeMethods.GWL_HWNDPARENT);
+            applicationOverlay = !NativeMethods.TryEmbed(applicationHandle, applicationHost.Handle, out originalApplicationStyle);
+            if (applicationOverlay)
+            {
+                NativeMethods.PrepareOverlay(applicationHandle, originalApplicationStyle, Handle);
+                WriteOutput("Native embedding was rejected; using compatible overlay mode.");
+            }
             applicationEmbedded = true;
-            NativeMethods.HideOtherTopLevelWindows((uint)applicationProcess.Id, applicationHandle);
+            if (!applicationOverlay) NativeMethods.HideOtherTopLevelWindows((uint)applicationProcess.Id, applicationHandle);
             ResizeApplication();
-            WriteOutput("Application attached (PID " + applicationProcess.Id + ").");
+            WriteOutput("Application attached in " + ApplicationModeName().ToLowerInvariant() + " mode (PID " + applicationProcess.Id + ").");
         }
 
         private ApplicationWindow FindExistingApplicationWindow()
@@ -904,7 +935,23 @@ namespace WorkbenchHost
         private void ResizeApplication()
         {
             if (!applicationEmbedded || !NativeMethods.IsWindow(applicationHandle)) return;
-            NativeMethods.Resize(applicationHandle, applicationHost.ClientSize.Width, applicationHost.ClientSize.Height);
+            if (applicationOverlay)
+            {
+                if (WindowState == FormWindowState.Minimized)
+                {
+                    NativeMethods.ShowWindow(applicationHandle, NativeMethods.SW_HIDE);
+                    return;
+                }
+                if (!applicationViewVisible) return;
+                NativeMethods.ShowWindow(applicationHandle, NativeMethods.SW_SHOW);
+                NativeMethods.PositionOverlay(applicationHandle, applicationHost.RectangleToScreen(applicationHost.ClientRectangle));
+            }
+            else NativeMethods.Resize(applicationHandle, applicationHost.ClientSize.Width, applicationHost.ClientSize.Height);
+        }
+
+        private string ApplicationModeName()
+        {
+            return applicationOverlay ? "Overlay" : "Embedded";
         }
 
         private void HideApplicationWindow()
@@ -937,6 +984,7 @@ namespace WorkbenchHost
             {
                 CloseApplicationWithHost();
                 applicationEmbedded = false;
+                applicationOverlay = false;
                 applicationHandle = IntPtr.Zero;
                 applicationProcess = null;
             }
@@ -1279,8 +1327,17 @@ namespace WorkbenchHost
             {
                 try
                 {
+                    if (!applicationOverlay && applicationHost != null && NativeMethods.IsWindow(applicationHandle) && NativeMethods.GetParent(applicationHandle) != applicationHost.Handle)
+                    {
+                        NativeMethods.PrepareOverlay(applicationHandle, originalApplicationStyle, Handle);
+                        applicationOverlay = true;
+                        WriteOutput("Application left its embedded parent; switched to compatible overlay mode.");
+                        encodingStatus.Text = "Runtime  Overlay  " + opacitySlider.Value + "%";
+                    }
+                    if (applicationOverlay && applicationViewVisible) ResizeApplication();
                     if (!applicationProcess.HasExited) return;
                     applicationEmbedded = false;
+                    applicationOverlay = false;
                     applicationHandle = IntPtr.Zero;
                     statusText.Text = "Application process exited";
                     WriteOutput("Application process exited.");
@@ -1362,38 +1419,11 @@ namespace WorkbenchHost
                     }
                 }
                 catch { }
-                CloseSiblingApplicationProcesses();
             }
             else if (applicationEmbedded && NativeMethods.IsWindow(applicationHandle))
             {
                 NativeMethods.ShowWindow(applicationHandle, NativeMethods.SW_HIDE);
-                NativeMethods.SetParent(applicationHandle, IntPtr.Zero);
-                NativeMethods.SetStyle(applicationHandle, NativeMethods.GWL_STYLE, originalApplicationStyle);
-                NativeMethods.SetWindowPos(applicationHandle, IntPtr.Zero, 100, 100, 1280, 720, NativeMethods.SWP_SHOWWINDOW);
-            }
-        }
-
-        private void CloseSiblingApplicationProcesses()
-        {
-            int primaryId = applicationProcess == null ? 0 : applicationProcess.Id;
-            Process[] siblings = Process.GetProcessesByName(profile.ProcessName);
-            foreach (Process sibling in siblings)
-            {
-                try
-                {
-                    if (sibling.Id == primaryId) continue;
-                    sibling.Refresh();
-                    if (sibling.HasExited) continue;
-                    IntPtr handle = NativeMethods.FindTopLevelWindow((uint)sibling.Id, profile.WindowClass);
-                    if (handle != IntPtr.Zero) NativeMethods.PostMessage(handle, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
-                    if (!sibling.WaitForExit(600))
-                    {
-                        sibling.Kill();
-                        sibling.WaitForExit(1200);
-                    }
-                }
-                catch { }
-                finally { sibling.Dispose(); }
+                NativeMethods.RestoreTopLevelWindow(applicationHandle, originalApplicationStyle, originalApplicationOwner);
             }
         }
 

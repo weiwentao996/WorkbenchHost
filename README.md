@@ -36,7 +36,7 @@ Use `File > Import Application...` (`Ctrl+Shift+I`) to generate a profile:
 
 1. Select the target EXE.
 2. Enter a display name and activation phrase.
-3. Adjust arguments, process name, window class, opacity, and close behavior when needed.
+3. Adjust arguments, process name, window class, opacity, and close behavior when needed. Process name and window class can be left empty for automatic detection.
 4. Select `Import`.
 
 The profile is saved under `profiles`, loaded immediately, and opened as a real JSON file. Multi-window applications should provide the actual main-window `windowClass`.
@@ -78,8 +78,8 @@ The profile is saved under `profiles`, loaded immediately, and opened as a real 
 | `executable` | Target EXE path. Supports absolute paths, paths relative to the host directory, and `%VAR%` environment variables. The file must exist. |
 | `workingDirectory` | Target working directory, using the same path rules; defaults to the EXE directory. |
 | `arguments` | Startup argument string; may be empty. |
-| `processName` | Process name without `.exe`; used to find existing instances and clean up helper processes. |
-| `windowClass` | Optional exact top-level window class. Set this for multi-window applications and use the real main-window class. When empty, the first visible top-level window is selected. |
+| `processName` | Optional process name without `.exe`; used to find an existing instance. When empty, it is inferred from the EXE file name. |
+| `windowClass` | Optional exact top-level window class. Set this for multi-window applications when needed. When empty, visible windows are scored by size, title, and window type. |
 | `attachExisting` | When `true`, prefer embedding an already running instance; when `false`, start a new process first. |
 | `launchTimeoutSeconds` | Maximum seconds to wait for a target window; defaults to `45`. |
 | `closeWithHost` | When `true`, closing the host closes the target; when `false`, the target is hidden and detached. |
@@ -92,6 +92,8 @@ The profile is saved under `profiles`, loaded immediately, and opened as a real 
 | `enableGrayscale` | When `true`, enable the toolbar `B/W` control. |
 
 Relative paths are resolved from the directory containing `WorkbenchHost.exe`. On a no-argument launch, invalid profiles or profiles whose EXE is missing are skipped. If none remain, the host stays available as an editor-only workspace. Explicitly launching an invalid profile reports the error.
+
+At runtime, the host first tries native Win32 embedding and verifies the resulting parent relationship. If the target rejects reparenting or changes its parent later, the host automatically switches to a borderless overlay that follows the editor surface. Protected, elevated, exclusive-fullscreen, and capture-blocked windows may still require external mode.
 
 The legacy `virtualFileName`, `virtualSource`, and `files` fields are retained only for backward compatibility. The real editor does not use them; omit them from new profiles.
 

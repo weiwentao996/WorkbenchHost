@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -8,6 +10,7 @@ namespace WorkbenchHost
     {
         internal const int GWL_STYLE = -16;
         internal const int GWL_EXSTYLE = -20;
+        internal const int GWL_HWNDPARENT = -8;
         internal const long WS_CHILD = 0x40000000L;
         internal const long WS_POPUP = 0x80000000L;
         internal const long WS_CAPTION = 0x00C00000L;
@@ -15,9 +18,12 @@ namespace WorkbenchHost
         internal const long WS_MINIMIZEBOX = 0x00020000L;
         internal const long WS_MAXIMIZEBOX = 0x00010000L;
         internal const long WS_SYSMENU = 0x00080000L;
+        internal const long WS_EX_TOOLWINDOW = 0x00000080L;
         internal const long WS_EX_LAYERED = 0x00080000L;
         internal const uint LWA_ALPHA = 0x2;
         internal const uint SWP_NOZORDER = 0x0004;
+        internal const uint SWP_NOACTIVATE = 0x0010;
+        internal const uint SWP_FRAMECHANGED = 0x0020;
         internal const uint SWP_SHOWWINDOW = 0x0040;
         internal const int SW_HIDE = 0;
         internal const int SW_SHOW = 5;
@@ -28,6 +34,15 @@ namespace WorkbenchHost
         {
             [MarshalAs(UnmanagedType.ByValArray, SizeConst = 25)]
             internal float[] Values;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeRect
+        {
+            internal int Left;
+            internal int Top;
+            internal int Right;
+            internal int Bottom;
         }
 
         [DllImport("user32.dll", SetLastError = true)]
@@ -61,7 +76,16 @@ namespace WorkbenchHost
         private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
 
         [DllImport("user32.dll")]
-        private static extern IntPtr GetParent(IntPtr hWnd);
+        internal static extern IntPtr GetParent(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rectangle);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetWindowTextLength(IntPtr hWnd);
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out int value, int valueSize);
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         private static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
@@ -97,20 +121,78 @@ namespace WorkbenchHost
         internal static IntPtr FindTopLevelWindow(uint processId, string expectedClass)
         {
             IntPtr result = IntPtr.Zero;
+            long bestScore = Int64.MinValue;
             EnumWindows(delegate(IntPtr hWnd, IntPtr lParam)
             {
-                if (!IsWindowVisible(hWnd) || GetParent(hWnd) != IntPtr.Zero) return true;
                 if (WindowProcessId(hWnd) != processId) return true;
-                if (!String.IsNullOrWhiteSpace(expectedClass))
-                {
-                    StringBuilder className = new StringBuilder(256);
-                    GetClassName(hWnd, className, className.Capacity);
-                    if (!String.Equals(className.ToString(), expectedClass, StringComparison.OrdinalIgnoreCase)) return true;
-                }
+                long score = WindowCandidateScore(hWnd, expectedClass);
+                if (score <= bestScore) return true;
+                bestScore = score;
                 result = hWnd;
-                return false;
+                return true;
             }, IntPtr.Zero);
             return result;
+        }
+
+        internal static HashSet<IntPtr> SnapshotTopLevelWindows()
+        {
+            HashSet<IntPtr> windows = new HashSet<IntPtr>();
+            EnumWindows(delegate(IntPtr hWnd, IntPtr lParam)
+            {
+                if (WindowCandidateScore(hWnd, String.Empty) != Int64.MinValue) windows.Add(hWnd);
+                return true;
+            }, IntPtr.Zero);
+            return windows;
+        }
+
+        internal static IntPtr FindNewTopLevelWindow(HashSet<IntPtr> previousWindows, uint excludedProcessId, string expectedClass, out uint processId)
+        {
+            IntPtr result = IntPtr.Zero;
+            uint resultProcessId = 0;
+            long bestScore = Int64.MinValue;
+            EnumWindows(delegate(IntPtr hWnd, IntPtr lParam)
+            {
+                if (previousWindows != null && previousWindows.Contains(hWnd)) return true;
+                uint candidateProcessId = WindowProcessId(hWnd);
+                if (candidateProcessId == 0 || candidateProcessId == excludedProcessId) return true;
+                long score = WindowCandidateScore(hWnd, expectedClass);
+                if (score <= bestScore) return true;
+                bestScore = score;
+                result = hWnd;
+                resultProcessId = candidateProcessId;
+                return true;
+            }, IntPtr.Zero);
+            processId = resultProcessId;
+            return result;
+        }
+
+        private static long WindowCandidateScore(IntPtr hWnd, string expectedClass)
+        {
+            if (!IsWindowVisible(hWnd)) return Int64.MinValue;
+            long style = GetStyle(hWnd, GWL_STYLE);
+            if ((style & WS_CHILD) != 0) return Int64.MinValue;
+            if (!String.IsNullOrWhiteSpace(expectedClass))
+            {
+                StringBuilder className = new StringBuilder(256);
+                GetClassName(hWnd, className, className.Capacity);
+                if (!String.Equals(className.ToString(), expectedClass, StringComparison.OrdinalIgnoreCase)) return Int64.MinValue;
+            }
+            try
+            {
+                int cloaked;
+                if (DwmGetWindowAttribute(hWnd, 14, out cloaked, sizeof(int)) == 0 && cloaked != 0) return Int64.MinValue;
+            }
+            catch { }
+            NativeRect rectangle;
+            if (!GetWindowRect(hWnd, out rectangle)) return Int64.MinValue;
+            long width = Math.Max(0, rectangle.Right - rectangle.Left);
+            long height = Math.Max(0, rectangle.Bottom - rectangle.Top);
+            long area = width * height;
+            if (area < 4096) return Int64.MinValue;
+            long score = Math.Min(area, 2000000000L);
+            if (GetWindowTextLength(hWnd) > 0) score += 100000000L;
+            if ((GetStyle(hWnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) != 0) score -= 50000000L;
+            return score;
         }
 
         internal static void HideOtherTopLevelWindows(uint processId, IntPtr keepWindow)
@@ -135,13 +217,40 @@ namespace WorkbenchHost
             else SetWindowLong32(hWnd, index, pointer);
         }
 
-        internal static long Embed(IntPtr child, IntPtr host)
+        internal static bool TryEmbed(IntPtr child, IntPtr host, out long originalStyle)
         {
-            long original = GetStyle(child, GWL_STYLE);
+            originalStyle = GetStyle(child, GWL_STYLE);
             long chrome = WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU;
             SetParent(child, host);
-            SetStyle(child, GWL_STYLE, (original & ~chrome) | WS_CHILD);
-            return original;
+            SetStyle(child, GWL_STYLE, (originalStyle & ~chrome) | WS_CHILD);
+            SetWindowPos(child, IntPtr.Zero, 0, 0, 1, 1, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+            if (GetParent(child) == host && (GetStyle(child, GWL_STYLE) & WS_CHILD) != 0) return true;
+            SetParent(child, IntPtr.Zero);
+            SetStyle(child, GWL_STYLE, originalStyle);
+            return false;
+        }
+
+        internal static void PrepareOverlay(IntPtr window, long originalStyle, IntPtr owner)
+        {
+            long chrome = WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_CHILD;
+            SetParent(window, IntPtr.Zero);
+            SetStyle(window, GWL_HWNDPARENT, owner.ToInt64());
+            SetStyle(window, GWL_STYLE, (originalStyle & ~chrome) | WS_POPUP);
+            SetWindowPos(window, IntPtr.Zero, 0, 0, 1, 1, SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        }
+
+        internal static void PositionOverlay(IntPtr window, Rectangle bounds)
+        {
+            if (bounds.Width < 1 || bounds.Height < 1) return;
+            SetWindowPos(window, IntPtr.Zero, bounds.X, bounds.Y, bounds.Width, bounds.Height, SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
+
+        internal static void RestoreTopLevelWindow(IntPtr window, long originalStyle, long originalOwner)
+        {
+            SetParent(window, IntPtr.Zero);
+            SetStyle(window, GWL_HWNDPARENT, originalOwner);
+            SetStyle(window, GWL_STYLE, originalStyle);
+            SetWindowPos(window, IntPtr.Zero, 100, 100, 1280, 720, SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         }
 
         internal static void Resize(IntPtr child, int width, int height)
