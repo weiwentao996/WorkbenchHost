@@ -65,6 +65,8 @@ namespace WorkbenchHost
         private int resizeEdges;
         private Point resizeStartCursor;
         private Rectangle resizeStartBounds;
+        private Rectangle resizePreviewBounds;
+        private bool resizePreviewVisible;
         private ToolStripLabel opacityLabel;
         private ToolStripMenuItem runButton;
         private ToolStripMenuItem grayscaleButton;
@@ -975,6 +977,7 @@ namespace WorkbenchHost
             grip.MouseDown += ResizeGripMouseDown;
             grip.MouseMove += ResizeGripMouseMove;
             grip.MouseUp += ResizeGripMouseUp;
+            grip.MouseCaptureChanged += ResizeGripMouseCaptureChanged;
             return grip;
         }
 
@@ -997,7 +1000,8 @@ namespace WorkbenchHost
             resizeEdges = (int)((Control)sender).Tag;
             resizeStartCursor = Cursor.Position;
             resizeStartBounds = Bounds;
-            SetResizeRedraw(false);
+            resizePreviewBounds = resizeStartBounds;
+            DrawResizePreview();
             ((Control)sender).Capture = true;
         }
 
@@ -1017,26 +1021,43 @@ namespace WorkbenchHost
             if ((resizeEdges & 4) != 0) next.Height = resizeStartBounds.Height + dy;
             next.Width = Math.Max(MinimumSize.Width, next.Width);
             next.Height = Math.Max(MinimumSize.Height, next.Height);
-            Bounds = next;
+            if (next == resizePreviewBounds) return;
+            EraseResizePreview();
+            resizePreviewBounds = next;
+            DrawResizePreview();
         }
 
         private void ResizeGripMouseUp(object sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
+            Rectangle finalBounds = resizePreviewBounds;
+            EraseResizePreview();
             resizing = false;
             ((Control)sender).Capture = false;
-            SetResizeRedraw(true);
-            ResizeApplication();
-            Invalidate(true);
+            Bounds = finalBounds;
             SaveSessionState();
         }
 
-        private void SetResizeRedraw(bool enabled)
+        private void ResizeGripMouseCaptureChanged(object sender, EventArgs e)
         {
-            NativeMethods.SetRedraw(contentSplit == null ? IntPtr.Zero : contentSplit.Handle, enabled);
-            NativeMethods.SetRedraw(tabs == null ? IntPtr.Zero : tabs.Handle, enabled);
-            NativeMethods.SetRedraw(tree == null ? IntPtr.Zero : tree.Handle, enabled);
-            NativeMethods.SetRedraw(applicationHost == null ? IntPtr.Zero : applicationHost.Handle, enabled);
+            Control grip = (Control)sender;
+            if (!resizing || grip.Capture) return;
+            EraseResizePreview();
+            resizing = false;
+        }
+
+        private void DrawResizePreview()
+        {
+            if (resizePreviewVisible) return;
+            ControlPaint.DrawReversibleFrame(resizePreviewBounds, Color.Black, FrameStyle.Thick);
+            resizePreviewVisible = true;
+        }
+
+        private void EraseResizePreview()
+        {
+            if (!resizePreviewVisible) return;
+            ControlPaint.DrawReversibleFrame(resizePreviewBounds, Color.Black, FrameStyle.Thick);
+            resizePreviewVisible = false;
         }
 
         private int ResizeEdgesAt(Point cursor)
@@ -1077,11 +1098,6 @@ namespace WorkbenchHost
 
         protected override void WndProc(ref Message m)
         {
-            if (m.Msg == 0x0014) // WM_ERASEBKGND: avoid a white flash during borderless resize
-            {
-                m.Result = new IntPtr(1);
-                return;
-            }
             if (m.Msg == 0x0020 && WindowState == FormWindowState.Normal) // WM_SETCURSOR
             {
                 int edges = ResizeEdgesAt(Cursor.Position);

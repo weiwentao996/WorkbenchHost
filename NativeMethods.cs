@@ -31,18 +31,12 @@ namespace WorkbenchHost
         internal const uint WM_CLOSE = 0x0010;
         internal const uint WM_NCLBUTTONDOWN = 0x00A1;
         internal const int HTCAPTION = 0x0002;
-        internal const uint WM_SETREDRAW = 0x000B;
 
         [DllImport("user32.dll")]
         internal static extern bool ReleaseCapture();
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         internal static extern IntPtr SendMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
-
-        internal static void SetRedraw(IntPtr hWnd, bool enabled)
-        {
-            if (hWnd != IntPtr.Zero) SendMessage(hWnd, WM_SETREDRAW, enabled ? new IntPtr(1) : IntPtr.Zero, IntPtr.Zero);
-        }
 
         [StructLayout(LayoutKind.Sequential)]
         private struct MagColorEffect
