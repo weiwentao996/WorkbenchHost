@@ -58,6 +58,13 @@ namespace WorkbenchHost
         private TitleBarButton minButton;
         private TitleBarButton maxButton;
         private TitleBarButton closeButton;
+        private Panel resizeRightGrip;
+        private Panel resizeBottomGrip;
+        private Panel resizeCornerGrip;
+        private bool resizing;
+        private int resizeEdges;
+        private Point resizeStartCursor;
+        private Rectangle resizeStartBounds;
         private ToolStripLabel opacityLabel;
         private ToolStripMenuItem runButton;
         private ToolStripMenuItem grayscaleButton;
@@ -144,6 +151,7 @@ namespace WorkbenchHost
             BackColor = windowColor;
             ForeColor = textColor;
             Font = uiFont;
+            DoubleBuffered = true;
             MinimumSize = new Size(960, 640);
             Size = new Size(1440, 900);
             StartPosition = FormStartPosition.CenterScreen;
@@ -325,12 +333,17 @@ namespace WorkbenchHost
         {
             titleBar = new Panel();
             titleBar.Dock = DockStyle.Top;
-            titleBar.Height = 34;
+            titleBar.Height = 35;
             titleBar.BackColor = VSCodeColors.TitleBar;
+            titleBar.MouseDown += TitleDragMouseDown;
+            titleBar.MouseDoubleClick += TitleDragMouseDoubleClick;
 
             Label icon = new Label();
-            icon.Dock = DockStyle.Left;
-            icon.Width = 28;
+            icon.Location = new Point(0, 0);
+            icon.Size = new Size(28, 35);
+            icon.BackColor = VSCodeColors.TitleBar;
+            icon.MouseDown += TitleDragMouseDown;
+            icon.MouseDoubleClick += TitleDragMouseDoubleClick;
             icon.Paint += delegate(object sender, PaintEventArgs e)
             {
                 try
@@ -342,7 +355,7 @@ namespace WorkbenchHost
             };
 
             FlowLayoutPanel windowButtons = new FlowLayoutPanel();
-            windowButtons.Dock = DockStyle.Fill;
+            windowButtons.Size = new Size(138, 35);
             windowButtons.FlowDirection = FlowDirection.LeftToRight;
             windowButtons.WrapContents = false;
             windowButtons.Padding = new Padding(0);
@@ -359,10 +372,9 @@ namespace WorkbenchHost
             windowButtons.Controls.AddRange(new Control[] { minButton, maxButton, closeButton });
 
             Panel commandCenter = new Panel();
-            commandCenter.Dock = DockStyle.Fill;
-            commandCenter.Height = 24;
-            commandCenter.Margin = new Padding(60, 5, 60, 5);
             commandCenter.BackColor = VSCodeColors.Input;
+            commandCenter.Cursor = Cursors.IBeam;
+            commandCenter.MouseDown += delegate { FocusCommandCenter(); };
             commandCenter.Paint += delegate(object sender, PaintEventArgs e)
             {
                 e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
@@ -380,39 +392,62 @@ namespace WorkbenchHost
             titleText.Font = uiFont;
             titleText.BackColor = VSCodeColors.Input;
             titleText.BorderStyle = BorderStyle.None;
-            titleText.Location = new Point(25, 5);
+            titleText.Location = new Point(25, 4);
             titleText.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-            titleText.Size = new Size(Math.Max(20, commandCenter.Width - 34), 20);
+            titleText.Size = new Size(Math.Max(20, commandCenter.Width - 34), titleText.PreferredHeight);
             titleText.KeyDown += CommandCenterKeyDown;
             titleText.Enter += delegate
             {
                 if (String.Equals(titleText.Text, WorkspaceCommandText(), StringComparison.Ordinal)) titleText.Clear();
             };
             titleText.Leave += delegate { RestoreCommandCenterText(); };
-            commandCenter.Resize += delegate { titleText.Width = Math.Max(20, commandCenter.ClientSize.Width - 34); };
+            commandCenter.Resize += delegate
+            {
+                titleText.Location = new Point(25, Math.Max(2, (commandCenter.ClientSize.Height - titleText.PreferredHeight) / 2));
+                titleText.Size = new Size(Math.Max(20, commandCenter.ClientSize.Width - 34), titleText.PreferredHeight);
+            };
             commandCenter.Controls.Add(titleText);
 
             Panel titleLeft = new Panel();
-            titleLeft.Dock = DockStyle.Fill;
+            titleLeft.Location = new Point(0, 0);
+            titleLeft.Size = new Size(450, 35);
             titleLeft.BackColor = VSCodeColors.TitleBar;
+            menu.MouseDown += delegate(object sender, MouseEventArgs e)
+            {
+                if (e.Button == MouseButtons.Left && menu.GetItemAt(e.Location) == null) BeginTitleDrag();
+            };
             titleLeft.Controls.Add(menu);
             titleLeft.Controls.Add(icon);
 
-            TableLayoutPanel titleLayout = new TableLayoutPanel();
-            titleLayout.Dock = DockStyle.Fill;
-            titleLayout.Margin = new Padding(0);
-            titleLayout.Padding = new Padding(0);
-            titleLayout.ColumnCount = 3;
-            titleLayout.RowCount = 1;
-            titleLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 470));
-            titleLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            titleLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 138));
-            titleLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            titleLayout.Controls.Add(titleLeft, 0, 0);
-            titleLayout.Controls.Add(commandCenter, 1, 0);
-            titleLayout.Controls.Add(windowButtons, 2, 0);
-            titleBar.Controls.Add(titleLayout);
+            titleBar.Controls.Add(titleLeft);
+            titleBar.Controls.Add(commandCenter);
+            titleBar.Controls.Add(windowButtons);
+            titleBar.Resize += delegate
+            {
+                const int leftWidth = 450;
+                const int rightWidth = 138;
+                const int gap = 12;
+                int available = Math.Max(120, titleBar.ClientSize.Width - leftWidth - rightWidth - gap * 2);
+                int commandWidth = Math.Min(600, available);
+                int centeredX = (titleBar.ClientSize.Width - commandWidth) / 2;
+                int commandX = Math.Max(leftWidth + gap, centeredX);
+                commandX = Math.Min(commandX, Math.Max(leftWidth + gap, titleBar.ClientSize.Width - rightWidth - gap - commandWidth));
+                titleLeft.Bounds = new Rectangle(0, 0, Math.Min(leftWidth, titleBar.ClientSize.Width), titleBar.ClientSize.Height);
+                commandCenter.Bounds = new Rectangle(commandX, 5, commandWidth, 25);
+                windowButtons.Location = new Point(Math.Max(0, titleBar.ClientSize.Width - rightWidth), 0);
+                windowButtons.Height = titleBar.ClientSize.Height;
+            };
             Controls.Add(titleBar);
+        }
+
+        private void TitleDragMouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left) BeginTitleDrag();
+        }
+
+        private void TitleDragMouseDoubleClick(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left) ToggleMaximize();
         }
 
         private void BeginTitleDrag()
@@ -804,7 +839,7 @@ namespace WorkbenchHost
             {
                 if (WindowState == FormWindowState.Maximized) MaximizedBounds = Screen.FromControl(this).WorkingArea;
                 UpdateMaximizeButton();
-                ResizeApplication();
+                if (!resizing) ResizeApplication();
             };
             tree.AfterExpand += delegate(object sender, TreeViewEventArgs e)
             {
@@ -884,6 +919,94 @@ namespace WorkbenchHost
             Activated += delegate { RepaintCustomChrome(); };
             Deactivate += delegate { RepaintCustomChrome(); };
             FormClosing += MainFormClosing;
+            BuildResizeGrips();
+        }
+
+        private void BuildResizeGrips()
+        {
+            resizeRightGrip = CreateResizeGrip(Cursors.SizeWE, 2);
+            resizeBottomGrip = CreateResizeGrip(Cursors.SizeNS, 4);
+            resizeCornerGrip = CreateResizeGrip(Cursors.SizeNWSE, 6);
+            Controls.Add(resizeRightGrip);
+            Controls.Add(resizeBottomGrip);
+            Controls.Add(resizeCornerGrip);
+            Resize += delegate { PositionResizeGrips(); };
+            PositionResizeGrips();
+        }
+
+        private Panel CreateResizeGrip(Cursor cursor, int edges)
+        {
+            Panel grip = new Panel();
+            grip.BackColor = Color.Transparent;
+            grip.Cursor = cursor;
+            grip.Tag = edges;
+            grip.MouseDown += ResizeGripMouseDown;
+            grip.MouseMove += ResizeGripMouseMove;
+            grip.MouseUp += ResizeGripMouseUp;
+            return grip;
+        }
+
+        private void PositionResizeGrips()
+        {
+            if (resizeRightGrip == null || IsDisposed) return;
+            int band = 8;
+            resizeRightGrip.Bounds = new Rectangle(Math.Max(0, ClientSize.Width - band), band, band, Math.Max(0, ClientSize.Height - band * 2));
+            resizeBottomGrip.Bounds = new Rectangle(band, Math.Max(0, ClientSize.Height - band), Math.Max(0, ClientSize.Width - band * 2), band);
+            resizeCornerGrip.Bounds = new Rectangle(Math.Max(0, ClientSize.Width - band), Math.Max(0, ClientSize.Height - band), band, band);
+            resizeRightGrip.BringToFront();
+            resizeBottomGrip.BringToFront();
+            resizeCornerGrip.BringToFront();
+        }
+
+        private void ResizeGripMouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left || WindowState != FormWindowState.Normal) return;
+            resizing = true;
+            resizeEdges = (int)((Control)sender).Tag;
+            resizeStartCursor = Cursor.Position;
+            resizeStartBounds = Bounds;
+            ((Control)sender).Capture = true;
+        }
+
+        private void ResizeGripMouseMove(object sender, MouseEventArgs e)
+        {
+            if (!resizing)
+            {
+                Cursor.Current = ((Control)sender).Cursor;
+                return;
+            }
+            if (!resizing) return;
+            Point cursor = Cursor.Position;
+            int dx = cursor.X - resizeStartCursor.X;
+            int dy = cursor.Y - resizeStartCursor.Y;
+            Rectangle next = resizeStartBounds;
+            if ((resizeEdges & 2) != 0) next.Width = resizeStartBounds.Width + dx;
+            if ((resizeEdges & 4) != 0) next.Height = resizeStartBounds.Height + dy;
+            next.Width = Math.Max(MinimumSize.Width, next.Width);
+            next.Height = Math.Max(MinimumSize.Height, next.Height);
+            Bounds = next;
+        }
+
+        private void ResizeGripMouseUp(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) return;
+            resizing = false;
+            ((Control)sender).Capture = false;
+            ResizeApplication();
+            SaveSessionState();
+        }
+
+        private int ResizeEdgesAt(Point cursor)
+        {
+            if (WindowState != FormWindowState.Normal || ClientSize.Width < 1 || ClientSize.Height < 1) return 0;
+            Point point = PointToClient(cursor);
+            const int band = 8;
+            bool right = point.X >= ClientSize.Width - band;
+            bool bottom = point.Y >= ClientSize.Height - band;
+            if (right && bottom) return 6;
+            if (right && point.Y >= band) return 2;
+            if (bottom && point.X >= band) return 4;
+            return 0;
         }
 
         private void RepaintCustomChrome()
@@ -904,13 +1027,30 @@ namespace WorkbenchHost
             get
             {
                 CreateParams cp = base.CreateParams;
-                cp.Style |= 0x00040000; // WS_THICKFRAME: keep the window resizable and shadowed
+                cp.Style |= 0x00C00000 | 0x00040000 | 0x00080000 | 0x00020000 | 0x00010000;
                 return cp;
             }
         }
 
         protected override void WndProc(ref Message m)
         {
+            if (m.Msg == 0x0014) // WM_ERASEBKGND: avoid a white flash during borderless resize
+            {
+                m.Result = new IntPtr(1);
+                return;
+            }
+            if (m.Msg == 0x0020 && WindowState == FormWindowState.Normal) // WM_SETCURSOR
+            {
+                int edges = ResizeEdgesAt(Cursor.Position);
+                if (edges == 2) Cursor.Current = Cursors.SizeWE;
+                else if (edges == 4) Cursor.Current = Cursors.SizeNS;
+                else if (edges == 6) Cursor.Current = Cursors.SizeNWSE;
+                if (edges != 0)
+                {
+                    m.Result = new IntPtr(1);
+                    return;
+                }
+            }
             if (m.Msg == 0x0085) // WM_NCPAINT: Windows must not paint over the custom title bar
             {
                 m.Result = IntPtr.Zero;
@@ -926,7 +1066,7 @@ namespace WorkbenchHost
             {
                 base.WndProc(ref m);
                 Point cursor = PointToClient(new Point((short)(m.LParam.ToInt64() & 0xffff), (short)((m.LParam.ToInt64() >> 16) & 0xffff)));
-                const int grip = 6;
+                const int grip = 8;
                 bool left = cursor.X < grip;
                 bool right = cursor.X >= ClientSize.Width - grip;
                 bool top = cursor.Y < grip;
@@ -940,6 +1080,30 @@ namespace WorkbenchHost
                 else if (top) m.Result = new IntPtr(12);          // HTTOP
                 else if (bottom) m.Result = new IntPtr(15);       // HTBOTTOM
                 return;
+            }
+            if (m.Msg == 0x0201 && WindowState == FormWindowState.Normal) // WM_LBUTTONDOWN fallback for borderless resize
+            {
+                Point cursor = PointToClient(Cursor.Position);
+                const int grip = 8;
+                bool left = cursor.X < grip;
+                bool right = cursor.X >= ClientSize.Width - grip;
+                bool top = cursor.Y < grip;
+                bool bottom = cursor.Y >= ClientSize.Height - grip;
+                int sizingEdge = 0;
+                if (left && top) sizingEdge = 4;          // WMSZ_TOPLEFT
+                else if (right && top) sizingEdge = 5;   // WMSZ_TOPRIGHT
+                else if (left && bottom) sizingEdge = 7; // WMSZ_BOTTOMLEFT
+                else if (right && bottom) sizingEdge = 8;// WMSZ_BOTTOMRIGHT
+                else if (left) sizingEdge = 1;            // WMSZ_LEFT
+                else if (right) sizingEdge = 2;           // WMSZ_RIGHT
+                else if (top) sizingEdge = 3;             // WMSZ_TOP
+                else if (bottom) sizingEdge = 6;          // WMSZ_BOTTOM
+                if (sizingEdge != 0)
+                {
+                    NativeMethods.ReleaseCapture();
+                    NativeMethods.SendMessage(Handle, 0x0112, new IntPtr(0xF000 | sizingEdge), IntPtr.Zero); // WM_SYSCOMMAND/SC_SIZE
+                    return;
+                }
             }
             if (m.Msg == 0x0083) // WM_NCCALCSIZE: remove the standard border while keeping resize support
             {
