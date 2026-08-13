@@ -2,17 +2,17 @@
 
 语言：[简体中文](README.zh-CN.md) | [English](README.md)
 
-WorkbenchHost 是一个独立运行的编辑器式 Windows 宿主。它使用真实文件和真实文件夹，不生成伪造代码文件；所有应用适配器共用同一个真实的 `config.yaml` 作为启动入口。
+WorkbenchHost 是一个独立运行的编辑器式 Windows 宿主。它使用真实文件和真实文件夹，不生成伪造代码文件；应用命令统一在窗口顶部的命令中心输入。
 
 ## 快速开始
 
 1. 双击 `Start Workbench.cmd`。
-2. 打开 `config.yaml`，输入目标 profile 配置的激活关键词。
+2. 点击标题栏中的命令中心，输入目标 profile 的激活关键词并按 `Enter`。
 3. 切换标签、按 `F10` 或将焦点移到其他窗口，即可隐藏目标程序并恢复代码界面。
 
 如果 `profiles` 为空，宿主会以纯编辑器模式启动。此时仍可以打开文件夹和编辑文件，使用 `File > Import Application...` 导入第一个适配器即可。
 
-只需要 `Start Workbench.cmd` 这一个启动入口。宿主启动时会自动加载 `profiles` 下所有有效的 `.json` 配置；可以导入任意数量的程序，并为每个程序设置不同的激活关键词。在共用的 `config.yaml` 中输入对应关键词，即可选择并打开目标程序，不需要为特定程序单独编写启动脚本。
+只需要 `Start Workbench.cmd` 这一个启动入口。宿主启动时会自动加载 `profiles` 下所有有效的 `.json` 配置；可以导入任意数量的程序，并为每个程序设置不同的激活关键词。在顶部命令中心输入对应关键词，即可选择并打开目标程序，不需要为特定程序单独编写启动脚本。
 
 ## 编辑器功能
 
@@ -60,7 +60,6 @@ WorkbenchHost 是一个独立运行的编辑器式 Windows 宿主。它使用真
   "killAfterMilliseconds": 1500,
   "activationPhrase": "hello my app",
   "workspaceDirectory": ".",
-  "triggerFile": "config.yaml",
   "defaultOpacity": 100,
   "focusProtection": true,
   "enableGrayscale": false
@@ -84,9 +83,9 @@ WorkbenchHost 是一个独立运行的编辑器式 Windows 宿主。它使用真
 | `launchTimeoutSeconds` | 等待目标窗口出现的最长秒数，默认 `45`。 |
 | `closeWithHost` | `true` 时关闭宿主也关闭目标程序；`false` 时只隐藏并释放窗口。 |
 | `killAfterMilliseconds` | 发送 `WM_CLOSE` 后等待的毫秒数，超时才强制终止；默认 `1200`。 |
-| `activationPhrase` | 在 `config.yaml` 中输入的启动关键词。识别后会立即从编辑器文本中移除。 |
+| `activationPhrase` | 在标题栏命令中心输入的精确启动命令。 |
 | `workspaceDirectory` | Explorer 初始目录。相对路径必须位于宿主目录内，也可以填写绝对路径。 |
-| `triggerFile` | 关键词监听文件。需要共用同一入口的 profile 都应填写 `config.yaml`；旧的 `db.go` 配置会自动迁移。 |
+| `triggerFile` | 仅为兼容旧配置保留，当前版本会忽略该字段；新 profile 请省略。 |
 | `defaultOpacity` | 目标窗口初始透明度，范围 `0` 到 `100`，默认 `100`。 |
 | `focusProtection` | `true` 时目标窗口失去前台焦点后自动切回代码。 |
 | `enableGrayscale` | `true` 时启用工具栏的 `B/W` 控制。 |

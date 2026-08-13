@@ -21,4 +21,3 @@ workspace-state.*
 # Local design previews and tooling caches
 shot*.png
 .reasonix/
-scripts/__pycache__/

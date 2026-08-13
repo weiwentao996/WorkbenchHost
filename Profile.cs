@@ -89,9 +89,6 @@ namespace WorkbenchHost
             if (String.IsNullOrWhiteSpace(ActivationPhrase)) ActivationPhrase = "hello world";
             if (String.IsNullOrWhiteSpace(VirtualFileName)) VirtualFileName = "application.runtime";
             if (String.IsNullOrWhiteSpace(WorkspaceDirectory)) WorkspaceDirectory = RootDirectory;
-            // Profiles created before config.yaml used db.go as the shared gateway.
-            if (String.IsNullOrWhiteSpace(TriggerFile) || String.Equals(TriggerFile.Trim(), "db.go", StringComparison.OrdinalIgnoreCase))
-                TriggerFile = "config.yaml";
             if (DefaultOpacity < 0 || DefaultOpacity > 100) DefaultOpacity = 100;
             if (Files == null) Files = new List<WorkbenchFile>();
         }
@@ -102,13 +99,6 @@ namespace WorkbenchHost
             string full = Path.IsPathRooted(expanded) ? Path.GetFullPath(expanded) : ResolvePath(expanded);
             if (!Directory.Exists(full)) throw new DirectoryNotFoundException("Workspace directory not found: " + full);
             return full;
-        }
-
-        public string ResolveTriggerFile()
-        {
-            string configured = Environment.ExpandEnvironmentVariables(TriggerFile ?? "config.yaml");
-            if (Path.IsPathRooted(configured)) return Path.GetFullPath(configured);
-            return ResolvePath(configured);
         }
 
         private void Validate()

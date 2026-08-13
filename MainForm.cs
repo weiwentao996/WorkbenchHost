@@ -16,7 +16,6 @@ namespace WorkbenchHost
         {
             internal string Path;
             internal bool IsDirectory;
-            internal bool IsTrigger;
         }
 
         private sealed class EditorDocument
@@ -29,7 +28,6 @@ namespace WorkbenchHost
             internal Label Breadcrumb;
             internal EditorGutter Gutter;
             internal TabPage Tab;
-            internal bool IsTrigger;
             internal bool SuppressChanges;
             internal bool IsUntitled;
         }
@@ -45,7 +43,6 @@ namespace WorkbenchHost
         private WorkbenchProfile profile;
         private readonly WorkspaceState sessionState;
         private string workspaceDirectory;
-        private string triggerPath;
         private int untitledCounter;
         private readonly Color windowColor = VSCodeColors.Window;
         private readonly Color sidebarColor = VSCodeColors.Sidebar;
@@ -57,7 +54,7 @@ namespace WorkbenchHost
 
         private MenuStrip menu;
         private Panel titleBar;
-        private Label titleText;
+        private TextBox titleText;
         private TitleBarButton minButton;
         private TitleBarButton maxButton;
         private TitleBarButton closeButton;
@@ -80,8 +77,8 @@ namespace WorkbenchHost
         private readonly ToolTip activityTip = new ToolTip();
 
         private readonly Dictionary<string, EditorDocument> openDocuments = new Dictionary<string, EditorDocument>(StringComparer.OrdinalIgnoreCase);
-        private EditorDocument triggerDocument;
         private EditorDocument lastCodeDocument;
+        private EditorDocument applicationHostDocument;
         private CodePanel applicationHost;
         private Process applicationProcess;
         private IntPtr applicationHandle = IntPtr.Zero;
@@ -109,9 +106,6 @@ namespace WorkbenchHost
             sessionState = WorkspaceState.Load();
             if (!String.IsNullOrWhiteSpace(sessionState.WorkspaceDirectory) && Directory.Exists(sessionState.WorkspaceDirectory))
                 workspaceDirectory = Path.GetFullPath(sessionState.WorkspaceDirectory);
-            triggerPath = profile == null ? Path.Combine(root, "config.yaml") : profile.ResolveTriggerFile();
-            EnsureTriggerFile();
-
             Font candidate = new Font("Cascadia Mono", 10F);
             if (candidate.Name.IndexOf("Cascadia", StringComparison.OrdinalIgnoreCase) < 0)
             {
@@ -132,7 +126,7 @@ namespace WorkbenchHost
             WriteOutput(profile == null ? "Host initialized in editor-only mode." : "Host initialized with profile: " + profile.Id);
             WriteOutput("Available adapters: " + AdapterNames());
             WriteOutput("Real workspace: " + workspaceDirectory);
-            WriteOutput("Activation file: " + triggerPath);
+            WriteOutput("Activation input: Command Center");
         }
 
         private void InitializeWindow()
@@ -289,9 +283,9 @@ namespace WorkbenchHost
             applicationDisplay.DropDownItems.Add(opacityHost);
             view.DropDownItems.Add(applicationDisplay);
 
-            runButton = new ToolStripMenuItem("Open config.yaml");
+            runButton = new ToolStripMenuItem("Focus Command Center");
             runButton.Enabled = profile != null;
-            runButton.Click += delegate { ShowTriggerCode(); };
+            runButton.Click += delegate { FocusCommandCenter(); };
             ToolStripMenuItem returnCode = new ToolStripMenuItem("Return to Code    F10");
             returnCode.Click += delegate { ShowLastCode(); };
             run.DropDownItems.Add(runButton);
@@ -378,20 +372,24 @@ namespace WorkbenchHost
                 IconPainter.DrawSearch(e.Graphics, new Rectangle(8, 5, 13, 13), VSCodeColors.TextMuted);
             };
 
-            titleText = new Label();
-            titleText.Dock = DockStyle.Fill;
+            titleText = new TextBox();
+            titleText.Dock = DockStyle.None;
             titleText.Text = Path.GetFileName(workspaceDirectory);
-            titleText.TextAlign = ContentAlignment.MiddleCenter;
+            titleText.TextAlign = HorizontalAlignment.Center;
             titleText.ForeColor = VSCodeColors.Text;
             titleText.Font = uiFont;
-            titleText.BackColor = Color.Transparent;
-            titleText.Padding = new Padding(24, 0, 8, 0);
-            titleText.UseMnemonic = false;
-            titleText.MouseDown += delegate(object sender, MouseEventArgs e)
+            titleText.BackColor = VSCodeColors.Input;
+            titleText.BorderStyle = BorderStyle.None;
+            titleText.Location = new Point(25, 5);
+            titleText.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+            titleText.Size = new Size(Math.Max(20, commandCenter.Width - 34), 20);
+            titleText.KeyDown += CommandCenterKeyDown;
+            titleText.Enter += delegate
             {
-                if (e.Button == MouseButtons.Left) BeginTitleDrag();
+                if (String.Equals(titleText.Text, WorkspaceCommandText(), StringComparison.Ordinal)) titleText.Clear();
             };
-            titleText.MouseDoubleClick += delegate { ToggleMaximize(); };
+            titleText.Leave += delegate { RestoreCommandCenterText(); };
+            commandCenter.Resize += delegate { titleText.Width = Math.Max(20, commandCenter.ClientSize.Width - 34); };
             commandCenter.Controls.Add(titleText);
 
             Panel titleLeft = new Panel();
@@ -483,7 +481,7 @@ namespace WorkbenchHost
                 if (index == 0) tree.Focus();
                 else if (index == 1) FindInCurrent();
                 else if (index == 2) { contentSplit.Panel2Collapsed = false; statusText.Text = "Source Control"; }
-                else if (index == 3) ShowTriggerCode();
+                else if (index == 3) FocusCommandCenter();
                 else if (index == 4) ImportApplicationProfile();
                 else if (index == 5) statusText.Text = "Accounts";
                 else if (index == 6) statusText.Text = "Manage";
@@ -761,17 +759,6 @@ namespace WorkbenchHost
                 tree.Nodes.Add(rootNode);
                 PopulateDirectory(rootNode, workspaceDirectory);
 
-                string triggerParent = Path.GetDirectoryName(triggerPath);
-                if (!String.Equals(triggerParent, workspaceDirectory, StringComparison.OrdinalIgnoreCase))
-                {
-                    TreeNode special = new TreeNode("WORKBENCH");
-                    special.NodeFont = new Font("Segoe UI", 8F, FontStyle.Bold);
-                    TreeNode trigger = new TreeNode(Path.GetFileName(triggerPath));
-                    trigger.ForeColor = Color.FromArgb(220, 220, 170);
-                    trigger.Tag = new NodeTarget { Path = triggerPath, IsTrigger = true };
-                    special.Nodes.Add(trigger);
-                    tree.Nodes.Add(special);
-                }
                 rootNode.Expand();
             }
             finally { tree.EndUpdate(); }
@@ -799,8 +786,7 @@ namespace WorkbenchHost
                 {
                     if ((child.Attributes & FileAttributes.Hidden) != 0 || (child.Attributes & FileAttributes.System) != 0) continue;
                     TreeNode node = new TreeNode(child.Name);
-                    node.Tag = new NodeTarget { Path = child.FullName, IsTrigger = String.Equals(child.FullName, triggerPath, StringComparison.OrdinalIgnoreCase) };
-                    if (((NodeTarget)node.Tag).IsTrigger) node.ForeColor = Color.FromArgb(220, 220, 170);
+                    node.Tag = new NodeTarget { Path = child.FullName };
                     parent.Nodes.Add(node);
                 }
             }
@@ -837,11 +823,7 @@ namespace WorkbenchHost
                 HideApplicationWindow();
                 applicationViewVisible = false;
                 ApplyGrayscaleState();
-                if (document.IsTrigger)
-                {
-                    document.Editor.Visible = true;
-                    document.Editor.BringToFront();
-                }
+                if (applicationHostDocument != null) applicationHostDocument.Editor.Visible = true;
                 lastCodeDocument = document;
                 UpdatePathStatus(document);
                 SaveSessionState();
@@ -971,10 +953,10 @@ namespace WorkbenchHost
         {
             NodeTarget target = node == null ? null : node.Tag as NodeTarget;
             if (target == null || target.IsDirectory) return;
-            OpenCodeFile(target.Path, Path.GetFileName(target.Path), target.IsTrigger);
+            OpenCodeFile(target.Path, Path.GetFileName(target.Path));
         }
 
-        private void OpenCodeFile(string path, string displayName, bool isTrigger)
+        private void OpenCodeFile(string path, string displayName)
         {
             string fullPath = Path.GetFullPath(path);
             EditorDocument existing;
@@ -1000,7 +982,6 @@ namespace WorkbenchHost
             EditorDocument document = new EditorDocument();
             document.Path = fullPath;
             document.DisplayName = displayName;
-            document.IsTrigger = isTrigger || String.Equals(fullPath, triggerPath, StringComparison.OrdinalIgnoreCase);
             document.Editor = NewEditor(false);
             document.SuppressChanges = true;
             document.Editor.Text = text;
@@ -1016,9 +997,8 @@ namespace WorkbenchHost
             document.Editor.Modified = false;
             document.SuppressChanges = false;
             document.Editor.SelectionChanged += delegate { UpdateCursorStatus(document.Editor); if (document.Gutter != null) document.Gutter.Invalidate(); };
-            document.Editor.TextChanged += delegate { DocumentTextChanged(document); };
+            document.Editor.TextChanged += delegate { UpdateDocumentTitle(document); };
             openDocuments[fullPath] = document;
-            if (document.IsTrigger) triggerDocument = document;
             tabs.SelectedTab = document.Tab;
             lastCodeDocument = document;
             UpdatePathStatus(document);
@@ -1033,18 +1013,14 @@ namespace WorkbenchHost
                 foreach (string path in sessionState.OpenFiles)
                 {
                     if (String.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
-                    OpenCodeFile(path, Path.GetFileName(path), String.Equals(Path.GetFullPath(path), triggerPath, StringComparison.OrdinalIgnoreCase));
+                    OpenCodeFile(path, Path.GetFileName(path));
                 }
-                if (!openDocuments.ContainsKey(Path.GetFullPath(triggerPath)))
-                    OpenCodeFile(triggerPath, Path.GetFileName(triggerPath), true);
 
                 if (!String.IsNullOrWhiteSpace(sessionState.ActiveFile))
                 {
                     EditorDocument active;
                     string activePath = Path.GetFullPath(sessionState.ActiveFile);
-                    bool legacyGateway = String.Equals(Path.GetFileName(activePath), "db.go", StringComparison.OrdinalIgnoreCase) &&
-                        String.Equals(Path.GetDirectoryName(activePath), Path.GetDirectoryName(triggerPath), StringComparison.OrdinalIgnoreCase);
-                    if (!legacyGateway && openDocuments.TryGetValue(activePath, out active)) tabs.SelectedTab = active.Tab;
+                    if (openDocuments.TryGetValue(activePath, out active)) tabs.SelectedTab = active.Tab;
                 }
             }
             finally { restoringSession = false; }
@@ -1105,46 +1081,58 @@ namespace WorkbenchHost
             return relative;
         }
 
-        private void EnsureTriggerFile()
+        private string WorkspaceCommandText()
         {
-            string directory = Path.GetDirectoryName(triggerPath);
-            if (!String.IsNullOrEmpty(directory) && !Directory.Exists(directory)) Directory.CreateDirectory(directory);
-            if (!File.Exists(triggerPath))
+            string name = Path.GetFileName(workspaceDirectory.TrimEnd(Path.DirectorySeparatorChar));
+            return String.IsNullOrWhiteSpace(name) ? "WorkbenchHost" : name;
+        }
+
+        private void RestoreCommandCenterText()
+        {
+            if (titleText == null || titleText.Focused) return;
+            titleText.Text = WorkspaceCommandText();
+            titleText.ForeColor = VSCodeColors.Text;
+        }
+
+        private void FocusCommandCenter()
+        {
+            if (titleText == null) return;
+            titleText.Focus();
+            titleText.SelectAll();
+        }
+
+        private void CommandCenterKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Escape)
             {
-                string source = "workspace:\r\n  name: workbench\r\n  restoreSession: true\r\n\r\neditor:\r\n  fontFamily: Cascadia Mono\r\n  wordWrap: false\r\n\r\napplication:\r\n  autoAttach: true\r\n  focusProtection: true\r\n";
-                File.WriteAllText(triggerPath, source, new UTF8Encoding(false));
+                titleText.Text = WorkspaceCommandText();
+                titleText.ForeColor = VSCodeColors.Text;
+                if (tabs.SelectedTab != null) tabs.Focus();
+                e.SuppressKeyPress = true;
+                return;
             }
-        }
-
-        private EditorDocument EnsureTriggerDocument()
-        {
-            if (triggerDocument == null || !tabs.TabPages.Contains(triggerDocument.Tab))
-                OpenCodeFile(triggerPath, Path.GetFileName(triggerPath), true);
-            return triggerDocument;
-        }
-
-        private void DocumentTextChanged(EditorDocument document)
-        {
-            if (document.SuppressChanges) return;
-            UpdateDocumentTitle(document);
-            if (!document.IsTrigger) return;
+            if (e.KeyCode != Keys.Enter) return;
+            string command = titleText.Text.Trim();
             WorkbenchProfile selectedProfile = null;
-            int index = -1;
             foreach (WorkbenchProfile candidate in profiles)
             {
                 if (String.IsNullOrWhiteSpace(candidate.ActivationPhrase)) continue;
-                int candidateIndex = document.Editor.Text.IndexOf(candidate.ActivationPhrase, StringComparison.OrdinalIgnoreCase);
-                if (candidateIndex < 0) continue;
-                selectedProfile = candidate;
-                index = candidateIndex;
-                break;
+                if (String.Equals(command, candidate.ActivationPhrase.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    selectedProfile = candidate;
+                    break;
+                }
             }
-            if (selectedProfile == null) return;
-            document.SuppressChanges = true;
-            document.Editor.Select(index, selectedProfile.ActivationPhrase.Length);
-            document.Editor.SelectedText = String.Empty;
-            document.SuppressChanges = false;
-            UpdateDocumentTitle(document);
+            e.SuppressKeyPress = true;
+            if (selectedProfile == null)
+            {
+                titleText.ForeColor = Color.FromArgb(244, 135, 113);
+                statusText.Text = String.IsNullOrWhiteSpace(command) ? "Enter an application command" : "Command not found";
+                titleText.SelectAll();
+                return;
+            }
+            titleText.Text = WorkspaceCommandText();
+            titleText.ForeColor = VSCodeColors.Text;
             try
             {
                 BeginInvoke((MethodInvoker)delegate
@@ -1156,27 +1144,34 @@ namespace WorkbenchHost
             catch { }
         }
 
-        private void ShowTriggerCode()
+        private void ShowCodeView()
         {
-            EditorDocument document = EnsureTriggerDocument();
-            if (document == null) return;
             HideApplicationWindow();
             applicationViewVisible = false;
             ApplyGrayscaleState();
-            document.Editor.Visible = true;
-            document.Editor.BringToFront();
-            suppressTabSwitch = true;
-            tabs.SelectedTab = document.Tab;
-            suppressTabSwitch = false;
-            lastCodeDocument = document;
-            UpdatePathStatus(document);
+            EditorDocument document = applicationHostDocument;
+            if (document != null && tabs.TabPages.Contains(document.Tab))
+            {
+                document.Editor.Visible = true;
+                document.Editor.BringToFront();
+                suppressTabSwitch = true;
+                tabs.SelectedTab = document.Tab;
+                suppressTabSwitch = false;
+                lastCodeDocument = document;
+                UpdatePathStatus(document);
+            }
             statusText.Text = "Ready";
-            if (ContainsFocus) document.Editor.Focus();
+            if (ContainsFocus && document != null) document.Editor.Focus();
         }
 
         private void ActivateApplication()
         {
-            EditorDocument document = EnsureTriggerDocument();
+            EditorDocument document = CurrentDocument();
+            if (document == null)
+            {
+                NewFile();
+                document = CurrentDocument();
+            }
             if (document == null) return;
             suppressTabSwitch = true;
             tabs.SelectedTab = document.Tab;
@@ -1208,7 +1203,7 @@ namespace WorkbenchHost
                 contentSplit.Panel2Collapsed = false;
                 statusText.Text = "Application failed to attach";
                 MessageBox.Show(ex.Message, "Unable to open application", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                ShowTriggerCode();
+                ShowCodeView();
             }
         }
 
@@ -1237,14 +1232,17 @@ namespace WorkbenchHost
 
         private CodePanel EnsureApplicationHost(EditorDocument document)
         {
-            if (applicationHost != null) return applicationHost;
-            applicationHost = new CodePanel();
-            applicationHost.Dock = DockStyle.Fill;
-            applicationHost.Visible = false;
-            applicationHost.CodeFont = codeFont;
+            if (applicationHost == null)
+            {
+                applicationHost = new CodePanel();
+                applicationHost.Dock = DockStyle.Fill;
+                applicationHost.Visible = false;
+                applicationHost.CodeFont = codeFont;
+                applicationHost.Resize += delegate { ResizeApplication(); };
+            }
+            if (applicationHost.Parent != document.Tab) document.Tab.Controls.Add(applicationHost);
             applicationHost.SourceEditor = document.Editor;
-            applicationHost.Resize += delegate { ResizeApplication(); };
-            document.Tab.Controls.Add(applicationHost);
+            applicationHostDocument = document;
             return applicationHost;
         }
 
@@ -1393,11 +1391,11 @@ namespace WorkbenchHost
         {
             if (applicationViewVisible)
             {
-                ShowTriggerCode();
+                ShowCodeView();
                 return;
             }
             if (lastCodeDocument != null && tabs.TabPages.Contains(lastCodeDocument.Tab)) tabs.SelectedTab = lastCodeDocument.Tab;
-            else ShowTriggerCode();
+            else ShowCodeView();
             Activate();
         }
 
@@ -1408,21 +1406,13 @@ namespace WorkbenchHost
             EditorDocument document = tab.Tag as EditorDocument;
             if (document == null) return;
             if (!ConfirmCloseDocument(document)) return;
-            if (document == triggerDocument && applicationViewVisible) ShowTriggerCode();
-            if (document == triggerDocument && applicationEmbedded)
+            if (document == applicationHostDocument && applicationViewVisible) ShowCodeView();
+            if (document == applicationHostDocument && applicationHost != null)
             {
-                CloseApplicationWithHost();
-                applicationEmbedded = false;
-                applicationOverlay = false;
-                applicationHandle = IntPtr.Zero;
-                applicationProcess = null;
+                applicationHost.Parent = null;
+                applicationHostDocument = null;
             }
             if (!String.IsNullOrEmpty(document.Path)) openDocuments.Remove(document.Path);
-            if (document == triggerDocument)
-            {
-                triggerDocument = null;
-                applicationHost = null;
-            }
             tabs.TabPages.Remove(tab);
             tab.Dispose();
             lastCodeDocument = tabs.SelectedTab == null ? null : tabs.SelectedTab.Tag as EditorDocument;
@@ -1465,7 +1455,7 @@ namespace WorkbenchHost
             OpenFileDialog dialog = new OpenFileDialog();
             dialog.InitialDirectory = workspaceDirectory;
             dialog.Filter = "All files|*.*|Go files|*.go|Source files|*.cs;*.lua;*.json;*.ps1;*.md|Text files|*.txt";
-            if (dialog.ShowDialog(this) == DialogResult.OK) OpenCodeFile(dialog.FileName, Path.GetFileName(dialog.FileName), false);
+            if (dialog.ShowDialog(this) == DialogResult.OK) OpenCodeFile(dialog.FileName, Path.GetFileName(dialog.FileName));
             dialog.Dispose();
         }
 
@@ -1478,6 +1468,7 @@ namespace WorkbenchHost
             {
                 workspaceDirectory = Path.GetFullPath(dialog.SelectedPath);
                 ReloadTree();
+                titleText.Text = WorkspaceCommandText();
                 explorerTitle.Text = "EXPLORER";
                 statusText.Text = "Workspace opened: " + workspaceDirectory;
                 SaveSessionState();
@@ -1519,7 +1510,8 @@ namespace WorkbenchHost
                 string profilePath = ApplicationProfileImporter.Import(root, settings);
                 WorkbenchProfile imported = WorkbenchProfile.Load(profilePath, root);
                 profiles.Add(imported);
-                OpenCodeFile(profilePath, Path.GetFileName(profilePath), false);
+                runButton.Enabled = true;
+                OpenCodeFile(profilePath, Path.GetFileName(profilePath));
                 statusText.Text = "Application profile imported: " + imported.DisplayName;
                 WriteOutput("Imported adapter: " + imported.Id);
             }
@@ -1664,7 +1656,6 @@ namespace WorkbenchHost
                 document.Editor.Modified = false;
                 UpdateDocumentTitle(document);
                 statusText.Text = "Saved " + document.Path;
-                if (String.Equals(document.Path, triggerPath, StringComparison.OrdinalIgnoreCase)) ReloadTree();
                 return true;
             }
             catch (Exception ex)
@@ -1698,11 +1689,6 @@ namespace WorkbenchHost
                 document.Editor.Modified = false;
                 openDocuments[newPath] = document;
                 if (document.Breadcrumb != null) document.Breadcrumb.Text = BreadcrumbText(document);
-                if (String.Equals(newPath, triggerPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    document.IsTrigger = true;
-                    triggerDocument = document;
-                }
                 UpdateDocumentTitle(document);
                 UpdatePathStatus(document);
                 ReloadTree();
@@ -1760,7 +1746,7 @@ namespace WorkbenchHost
                 else if (++focusAwayTicks >= 3)
                 {
                     focusAwayTicks = 0;
-                    ShowTriggerCode();
+                    ShowCodeView();
                 }
             }
             else focusAwayTicks = 0;
@@ -1780,7 +1766,7 @@ namespace WorkbenchHost
                     applicationHandle = IntPtr.Zero;
                     statusText.Text = "Application process exited";
                     WriteOutput("Application process exited.");
-                    ShowTriggerCode();
+                    ShowCodeView();
                 }
                 catch { }
             }
