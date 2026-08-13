@@ -34,8 +34,8 @@ namespace WorkbenchHost
             MaximizeBox = false;
             ShowInTaskbar = false;
             ClientSize = new Size(580, 438);
-            BackColor = Color.FromArgb(30, 30, 30);
-            ForeColor = Color.FromArgb(220, 220, 220);
+            BackColor = VSCodeColors.Sidebar;
+            ForeColor = VSCodeColors.Text;
             Font = new Font("Segoe UI", 9F);
 
             TableLayoutPanel layout = new TableLayoutPanel();
@@ -60,6 +60,8 @@ namespace WorkbenchHost
             opacity.Maximum = 100;
             opacity.Value = 100;
             opacity.Dock = DockStyle.Fill;
+            opacity.BackColor = VSCodeColors.Input;
+            opacity.ForeColor = VSCodeColors.TextBright;
             attachExisting = Option("Attach existing instance", true);
             closeWithHost = Option("Close application with host", true);
             focusProtection = Option("Return to code on focus loss", true);
@@ -84,10 +86,20 @@ namespace WorkbenchHost
             import.Text = "Import";
             import.DialogResult = DialogResult.OK;
             import.Size = new Size(88, 30);
+            import.FlatStyle = FlatStyle.Flat;
+            import.FlatAppearance.BorderSize = 0;
+            import.FlatAppearance.MouseOverBackColor = VSCodeColors.Accent;
+            import.BackColor = VSCodeColors.AccentDark;
+            import.ForeColor = VSCodeColors.TextBright;
             Button cancel = new Button();
             cancel.Text = "Cancel";
             cancel.DialogResult = DialogResult.Cancel;
             cancel.Size = new Size(88, 30);
+            cancel.FlatStyle = FlatStyle.Flat;
+            cancel.FlatAppearance.BorderSize = 0;
+            cancel.FlatAppearance.MouseOverBackColor = VSCodeColors.Hover;
+            cancel.BackColor = VSCodeColors.Input;
+            cancel.ForeColor = VSCodeColors.TextBright;
             commands.Controls.Add(import);
             commands.Controls.Add(cancel);
             layout.Controls.Add(commands, 0, 11);
@@ -125,6 +137,9 @@ namespace WorkbenchHost
             input.Text = value;
             input.ReadOnly = readOnly;
             input.Dock = DockStyle.Fill;
+            input.BackColor = VSCodeColors.Input;
+            input.ForeColor = VSCodeColors.TextBright;
+            input.BorderStyle = BorderStyle.FixedSingle;
             return input;
         }
 
@@ -135,6 +150,7 @@ namespace WorkbenchHost
             option.Checked = value;
             option.Dock = DockStyle.Fill;
             option.AutoSize = true;
+            option.ForeColor = VSCodeColors.Text;
             return option;
         }
 

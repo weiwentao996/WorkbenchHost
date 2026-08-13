@@ -12,7 +12,7 @@ namespace WorkbenchHost
         internal CodePanel()
         {
             DoubleBuffered = true;
-            BackColor = Color.FromArgb(31, 31, 31);
+            BackColor = VSCodeColors.Editor;
             ResizeRedraw = true;
         }
 
@@ -25,7 +25,7 @@ namespace WorkbenchHost
             string[] lines = SourceEditor.Lines;
             float lineHeight = CodeFont.GetHeight(e.Graphics) + 3;
             int visibleLines = (int)Math.Ceiling(ClientSize.Height / lineHeight);
-            using (Brush brush = new SolidBrush(Color.FromArgb(204, 204, 204)))
+            using (Brush brush = new SolidBrush(VSCodeColors.Text))
             {
                 for (int i = 0; i < Math.Min(lines.Length, visibleLines); i++)
                 {

@@ -17,3 +17,8 @@ profiles/*.json
 # Local workspace/session data
 workspace-state.json
 workspace-state.*
+
+# Local design previews and tooling caches
+shot*.png
+.reasonix/
+scripts/__pycache__/

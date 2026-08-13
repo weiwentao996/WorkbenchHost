@@ -29,6 +29,14 @@ namespace WorkbenchHost
         internal const int SW_HIDE = 0;
         internal const int SW_SHOW = 5;
         internal const uint WM_CLOSE = 0x0010;
+        internal const uint WM_NCLBUTTONDOWN = 0x00A1;
+        internal const int HTCAPTION = 0x0002;
+
+        [DllImport("user32.dll")]
+        internal static extern bool ReleaseCapture();
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        internal static extern IntPtr SendMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct MagColorEffect

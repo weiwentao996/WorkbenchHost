@@ -7,6 +7,6 @@ if not exist "%CSC%" (
   exit /b 1
 )
 if not exist "%~dp0profiles" mkdir "%~dp0profiles"
-"%CSC%" /nologo /target:winexe /optimize+ /out:"%~dp0.\WorkbenchHost.exe" /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll "%~dp0Program.cs" "%~dp0Profile.cs" "%~dp0ProfileImporter.cs" "%~dp0WorkspaceState.cs" "%~dp0NativeMethods.cs" "%~dp0CodePanel.cs" "%~dp0QuickImportDialog.cs" "%~dp0MainForm.cs"
+"%CSC%" /nologo /target:winexe /optimize+ /out:"%~dp0.\WorkbenchHost.exe" /win32icon:"%~dp0icon.ico" /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll "%~dp0Program.cs" "%~dp0Profile.cs" "%~dp0ProfileImporter.cs" "%~dp0WorkspaceState.cs" "%~dp0NativeMethods.cs" "%~dp0WorkbenchTheme.cs" "%~dp0CodePanel.cs" "%~dp0QuickImportDialog.cs" "%~dp0MainForm.cs"
 if errorlevel 1 exit /b %errorlevel%
 echo Built WorkbenchHost.exe

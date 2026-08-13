@@ -44,20 +44,23 @@ namespace WorkbenchHost
         private string workspaceDirectory;
         private string triggerPath;
         private int untitledCounter;
-        private readonly Color windowColor = Color.FromArgb(24, 24, 24);
-        private readonly Color sidebarColor = Color.FromArgb(32, 32, 32);
-        private readonly Color editorColor = Color.FromArgb(31, 31, 31);
-        private readonly Color textColor = Color.FromArgb(204, 204, 204);
-        private readonly Color mutedColor = Color.FromArgb(138, 138, 138);
+        private readonly Color windowColor = VSCodeColors.Window;
+        private readonly Color sidebarColor = VSCodeColors.Sidebar;
+        private readonly Color editorColor = VSCodeColors.Editor;
+        private readonly Color textColor = VSCodeColors.Text;
+        private readonly Color mutedColor = VSCodeColors.TextMuted;
         private readonly Font uiFont = new Font("Segoe UI", 9F);
         private readonly Font codeFont;
 
         private MenuStrip menu;
-        private ToolStrip toolbar;
-        private ToolStripLabel pathLabel;
+        private Panel titleBar;
+        private Label titleText;
+        private TitleBarButton minButton;
+        private TitleBarButton maxButton;
+        private TitleBarButton closeButton;
         private ToolStripLabel opacityLabel;
-        private ToolStripButton runButton;
-        private ToolStripButton grayscaleButton;
+        private ToolStripMenuItem runButton;
+        private ToolStripMenuItem grayscaleButton;
         private TrackBar opacitySlider;
         private StatusStrip status;
         private ToolStripStatusLabel statusText;
@@ -69,6 +72,9 @@ namespace WorkbenchHost
         private TabControl tabs;
         private RichTextBox output;
         private System.Windows.Forms.Timer watchTimer;
+        private int activityHoverIndex = -1;
+        private int closeHoverIndex = -1;
+        private readonly ToolTip activityTip = new ToolTip();
 
         private readonly Dictionary<string, EditorDocument> openDocuments = new Dictionary<string, EditorDocument>(StringComparer.OrdinalIgnoreCase);
         private EditorDocument triggerDocument;
@@ -114,10 +120,11 @@ namespace WorkbenchHost
 
             InitializeWindow();
             BuildMenu();
-            BuildToolbar();
+            BuildTitleBar();
             BuildStatus();
             BuildWorkspace();
             BuildEvents();
+            Controls.SetChildIndex(titleBar, Controls.Count - 1);
             RestoreSession();
             WriteOutput(profile == null ? "Host initialized in editor-only mode." : "Host initialized with profile: " + profile.Id);
             WriteOutput("Available adapters: " + AdapterNames());
@@ -128,6 +135,7 @@ namespace WorkbenchHost
         private void InitializeWindow()
         {
             Text = profiles.Count == 1 ? profile.WindowTitle : "workspace - Code";
+            FormBorderStyle = FormBorderStyle.None;
             BackColor = windowColor;
             ForeColor = textColor;
             Font = uiFont;
@@ -143,8 +151,24 @@ namespace WorkbenchHost
                     Bounds = savedBounds;
                 }
             }
-            if (sessionState.Maximized) WindowState = FormWindowState.Maximized;
+            if (sessionState.Maximized)
+            {
+                MaximizedBounds = Screen.FromPoint(new Point(Bounds.Left + Bounds.Width / 2, Bounds.Top + Bounds.Height / 2)).WorkingArea;
+                WindowState = FormWindowState.Maximized;
+            }
+            else Bounds = ClampToWorkingArea(Bounds);
             KeyPreview = true;
+        }
+
+        private static Rectangle ClampToWorkingArea(Rectangle bounds)
+        {
+            Screen screen = Screen.FromPoint(new Point(bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 2));
+            Rectangle work = screen.WorkingArea;
+            int width = Math.Min(bounds.Width, work.Width);
+            int height = Math.Min(bounds.Height, work.Height);
+            int x = Math.Max(work.Left, Math.Min(bounds.Left, work.Right - width));
+            int y = Math.Max(work.Top, Math.Min(bounds.Top, work.Bottom - height));
+            return new Rectangle(x, y, width, height);
         }
 
         private static bool IsVisibleOnAnyScreen(Rectangle bounds)
@@ -160,11 +184,12 @@ namespace WorkbenchHost
         private void BuildMenu()
         {
             menu = new MenuStrip();
-            menu.Dock = DockStyle.Top;
-            menu.BackColor = windowColor;
+            menu.Dock = DockStyle.Fill;
+            menu.AutoSize = false;
+            menu.Padding = new Padding(4, 6, 4, 6);
+            menu.BackColor = VSCodeColors.TitleBar;
             menu.ForeColor = textColor;
-            menu.RenderMode = ToolStripRenderMode.System;
-            menu.Padding = new Padding(8, 2, 0, 2);
+            menu.Renderer = new VSCodeToolStripRenderer(VSCodeColors.TitleBar);
 
             ToolStripMenuItem file = new ToolStripMenuItem("File");
             ToolStripMenuItem edit = new ToolStripMenuItem("Edit");
@@ -198,6 +223,9 @@ namespace WorkbenchHost
             edit.DropDownItems.Add(MenuItem("Select All", delegate { EditCurrent("selectall"); }, Keys.Control | Keys.A));
 
             selection.DropDownItems.Add(MenuItem("Select All", delegate { EditCurrent("selectall"); }, Keys.Control | Keys.A));
+            go.DropDownItems.Add(MenuItem("Previous Editor", delegate { if (tabs.TabCount > 0) tabs.SelectedIndex = Math.Max(0, tabs.SelectedIndex - 1); }, Keys.None));
+            go.DropDownItems.Add(MenuItem("Next Editor", delegate { if (tabs.TabCount > 0) tabs.SelectedIndex = Math.Min(tabs.TabCount - 1, tabs.SelectedIndex + 1); }, Keys.None));
+            go.DropDownItems.Add(new ToolStripSeparator());
             go.DropDownItems.Add(MenuItem("Go to Line...", delegate { GoToLine(); }, Keys.Control | Keys.G));
 
             ToolStripMenuItem toggleOutput = new ToolStripMenuItem("Toggle Output");
@@ -213,11 +241,49 @@ namespace WorkbenchHost
             view.DropDownItems.Add(toggleOutput);
             view.DropDownItems.Add(focusItem);
 
-            ToolStripMenuItem openRuntime = new ToolStripMenuItem("Open db.go");
-            openRuntime.Click += delegate { ShowTriggerCode(); };
+            ToolStripMenuItem applicationDisplay = new ToolStripMenuItem("Application Display");
+            grayscaleButton = new ToolStripMenuItem("Grayscale");
+            grayscaleButton.CheckOnClick = true;
+            grayscaleButton.Enabled = profile != null && profile.EnableGrayscale;
+            grayscaleButton.ToolTipText = "Toggle low-overhead system grayscale";
+            grayscaleButton.CheckedChanged += delegate
+            {
+                ApplyGrayscaleState();
+                if (applicationViewVisible) statusText.Text = grayscaleButton.Checked ? "Application attached - grayscale enabled" : "Application attached - color enabled";
+            };
+
+            int initialOpacity = profile == null ? 100 : profile.DefaultOpacity;
+            opacityLabel = new ToolStripLabel("Opacity: " + initialOpacity + "%");
+            opacityLabel.Enabled = false;
+            opacitySlider = new TrackBar();
+            opacitySlider.Minimum = 0;
+            opacitySlider.Maximum = 100;
+            opacitySlider.Value = initialOpacity;
+            opacitySlider.TickStyle = TickStyle.None;
+            opacitySlider.AutoSize = false;
+            opacitySlider.Size = new Size(180, 26);
+            opacitySlider.BackColor = VSCodeColors.Dropdown;
+            opacitySlider.ValueChanged += delegate
+            {
+                opacityLabel.Text = "Opacity: " + opacitySlider.Value + "%";
+                if (applicationEmbedded && NativeMethods.IsWindow(applicationHandle)) NativeMethods.SetOpacity(applicationHandle, opacitySlider.Value, originalApplicationExStyle);
+                if (applicationViewVisible) encodingStatus.Text = "Runtime  " + ApplicationModeName() + "  " + opacitySlider.Value + "%";
+            };
+            ToolStripControlHost opacityHost = new ToolStripControlHost(opacitySlider);
+            opacityHost.AutoSize = false;
+            opacityHost.Size = new Size(190, 30);
+            applicationDisplay.DropDownItems.Add(grayscaleButton);
+            applicationDisplay.DropDownItems.Add(new ToolStripSeparator());
+            applicationDisplay.DropDownItems.Add(opacityLabel);
+            applicationDisplay.DropDownItems.Add(opacityHost);
+            view.DropDownItems.Add(applicationDisplay);
+
+            runButton = new ToolStripMenuItem("Open db.go");
+            runButton.Enabled = profile != null;
+            runButton.Click += delegate { ShowTriggerCode(); };
             ToolStripMenuItem returnCode = new ToolStripMenuItem("Return to Code    F10");
             returnCode.Click += delegate { ShowLastCode(); };
-            run.DropDownItems.Add(openRuntime);
+            run.DropDownItems.Add(runButton);
             run.DropDownItems.Add(returnCode);
 
             ToolStripMenuItem outputItem = new ToolStripMenuItem("Output    Ctrl+J");
@@ -228,8 +294,109 @@ namespace WorkbenchHost
             about.Click += delegate { MessageBox.Show("Application adapters: " + AdapterNames() + "\r\nWorkspace: " + workspaceDirectory, "Workbench Host"); };
             help.DropDownItems.Add(about);
 
-            Controls.Add(menu);
+            foreach (ToolStripMenuItem item in menu.Items)
+            {
+                item.Padding = new Padding(7, 5, 7, 5);
+                ApplyMenuTheme(item);
+            }
             MainMenuStrip = menu;
+        }
+
+        private void ApplyMenuTheme(ToolStripMenuItem item)
+        {
+            item.ForeColor = textColor;
+            item.DropDown.Renderer = new VSCodeToolStripRenderer(VSCodeColors.TitleBar);
+            item.DropDown.ForeColor = textColor;
+            item.DropDown.BackColor = VSCodeColors.Dropdown;
+            foreach (ToolStripItem child in item.DropDownItems)
+            {
+                child.ForeColor = textColor;
+                ToolStripMenuItem sub = child as ToolStripMenuItem;
+                if (sub != null) ApplyMenuTheme(sub);
+            }
+        }
+
+        private void BuildTitleBar()
+        {
+            titleBar = new Panel();
+            titleBar.Dock = DockStyle.Top;
+            titleBar.Height = 34;
+            titleBar.BackColor = VSCodeColors.TitleBar;
+
+            Label icon = new Label();
+            icon.Dock = DockStyle.Left;
+            icon.Width = 28;
+            icon.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                try
+                {
+                    Icon appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                    if (appIcon != null) e.Graphics.DrawIcon(appIcon, new Rectangle(6, 9, 16, 16));
+                }
+                catch { }
+            };
+
+            FlowLayoutPanel windowButtons = new FlowLayoutPanel();
+            windowButtons.Dock = DockStyle.Fill;
+            windowButtons.FlowDirection = FlowDirection.LeftToRight;
+            windowButtons.WrapContents = false;
+            windowButtons.Padding = new Padding(0);
+            windowButtons.BackColor = VSCodeColors.TitleBar;
+            minButton = new TitleBarButton(TitleBarButton.Kind.Minimize);
+            maxButton = new TitleBarButton(TitleBarButton.Kind.Maximize);
+            closeButton = new TitleBarButton(TitleBarButton.Kind.Close);
+            minButton.Clicked += delegate { WindowState = FormWindowState.Minimized; };
+            maxButton.Clicked += delegate { ToggleMaximize(); };
+            closeButton.Clicked += delegate { Close(); };
+            windowButtons.Controls.AddRange(new Control[] { minButton, maxButton, closeButton });
+
+            titleText = new Label();
+            titleText.Dock = DockStyle.Fill;
+            titleText.Text = Text;
+            titleText.TextAlign = ContentAlignment.MiddleCenter;
+            titleText.ForeColor = VSCodeColors.Text;
+            titleText.Font = uiFont;
+            titleText.UseMnemonic = false;
+            titleText.MouseDown += delegate(object sender, MouseEventArgs e)
+            {
+                if (e.Button == MouseButtons.Left) BeginTitleDrag();
+            };
+            titleText.MouseDoubleClick += delegate { ToggleMaximize(); };
+
+            Panel titleLeft = new Panel();
+            titleLeft.Dock = DockStyle.Fill;
+            titleLeft.BackColor = VSCodeColors.TitleBar;
+            titleLeft.Controls.Add(menu);
+            titleLeft.Controls.Add(icon);
+
+            TableLayoutPanel titleLayout = new TableLayoutPanel();
+            titleLayout.Dock = DockStyle.Fill;
+            titleLayout.Margin = new Padding(0);
+            titleLayout.Padding = new Padding(0);
+            titleLayout.ColumnCount = 3;
+            titleLayout.RowCount = 1;
+            titleLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 470));
+            titleLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            titleLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 138));
+            titleLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            titleLayout.Controls.Add(titleLeft, 0, 0);
+            titleLayout.Controls.Add(titleText, 1, 0);
+            titleLayout.Controls.Add(windowButtons, 2, 0);
+            titleBar.Controls.Add(titleLayout);
+            Controls.Add(titleBar);
+        }
+
+        private void BeginTitleDrag()
+        {
+            NativeMethods.ReleaseCapture();
+            NativeMethods.SendMessage(Handle, NativeMethods.WM_NCLBUTTONDOWN, new IntPtr(NativeMethods.HTCAPTION), IntPtr.Zero);
+        }
+
+        private void ToggleMaximize()
+        {
+            MaximizedBounds = Screen.FromControl(this).WorkingArea;
+            WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
+            if (WindowState == FormWindowState.Normal) Bounds = ClampToWorkingArea(Bounds);
         }
 
         private ToolStripMenuItem MenuItem(string text, EventHandler action, Keys shortcut)
@@ -240,78 +407,14 @@ namespace WorkbenchHost
             return item;
         }
 
-        private void BuildToolbar()
-        {
-            toolbar = new ToolStrip();
-            toolbar.Dock = DockStyle.Top;
-            toolbar.GripStyle = ToolStripGripStyle.Hidden;
-            toolbar.BackColor = editorColor;
-            toolbar.ForeColor = textColor;
-            toolbar.Height = 36;
-            toolbar.Padding = new Padding(8, 4, 8, 4);
-
-            ToolStripButton back = new ToolStripButton("<");
-            back.ToolTipText = "Previous editor";
-            back.Click += delegate { if (tabs.TabCount > 0) tabs.SelectedIndex = Math.Max(0, tabs.SelectedIndex - 1); };
-            ToolStripButton forward = new ToolStripButton(">");
-            forward.ToolTipText = "Next editor";
-            forward.Click += delegate { if (tabs.TabCount > 0) tabs.SelectedIndex = Math.Min(tabs.TabCount - 1, tabs.SelectedIndex + 1); };
-            ToolStripButton openFolder = new ToolStripButton("OPEN FOLDER");
-            openFolder.ToolTipText = "Open a real workspace folder";
-            openFolder.Click += delegate { OpenFolder(); };
-            ToolStripButton save = new ToolStripButton("SAVE");
-            save.ToolTipText = "Save current file (Ctrl+S)";
-            save.Click += delegate { SaveCurrentDocument(); };
-            pathLabel = new ToolStripLabel("  " + RelativePath(workspaceDirectory));
-            pathLabel.ForeColor = mutedColor;
-
-            ToolStripButton code = new ToolStripButton("CODE");
-            code.Alignment = ToolStripItemAlignment.Right;
-            code.ToolTipText = "Return to db.go (F10)";
-            code.Click += delegate { ShowLastCode(); };
-            runButton = new ToolStripButton("RUN");
-            runButton.Alignment = ToolStripItemAlignment.Right;
-            runButton.Enabled = profile != null;
-            runButton.ToolTipText = "Open db.go activation file";
-            runButton.Click += delegate { ShowTriggerCode(); };
-
-            opacitySlider = new TrackBar();
-            opacitySlider.Minimum = 0;
-            opacitySlider.Maximum = 100;
-            int initialOpacity = profile == null ? 100 : profile.DefaultOpacity;
-            opacitySlider.Value = initialOpacity;
-            opacitySlider.TickStyle = TickStyle.None;
-            opacitySlider.AutoSize = false;
-            opacitySlider.Size = new Size(96, 24);
-            ToolStripControlHost opacityHost = new ToolStripControlHost(opacitySlider);
-            opacityHost.Alignment = ToolStripItemAlignment.Right;
-            opacityHost.AutoSize = false;
-            opacityHost.Size = new Size(102, 24);
-            opacityHost.ToolTipText = "Application opacity";
-            opacityLabel = new ToolStripLabel("OPACITY " + initialOpacity + "%");
-            opacityLabel.Alignment = ToolStripItemAlignment.Right;
-            opacityLabel.ForeColor = mutedColor;
-
-            grayscaleButton = new ToolStripButton("B/W");
-            grayscaleButton.Alignment = ToolStripItemAlignment.Right;
-            grayscaleButton.CheckOnClick = true;
-            grayscaleButton.Enabled = profile != null && profile.EnableGrayscale;
-            grayscaleButton.ToolTipText = "Toggle low-overhead system grayscale";
-
-            toolbar.Items.AddRange(new ToolStripItem[]
-            {
-                back, forward, openFolder, save, pathLabel, code, runButton, opacityHost, opacityLabel, grayscaleButton
-            });
-            Controls.Add(toolbar);
-        }
-
         private void BuildStatus()
         {
             status = new StatusStrip();
             status.Dock = DockStyle.Bottom;
-            status.BackColor = windowColor;
-            status.ForeColor = textColor;
+            status.BackColor = VSCodeColors.StatusBar;
+            status.ForeColor = Color.White;
             status.SizingGrip = false;
+            status.Font = new Font("Segoe UI", 8.25F);
             ToolStripStatusLabel branch = new ToolStripStatusLabel("main");
             ToolStripStatusLabel diagnostics = new ToolStripStatusLabel("0 errors  0 warnings");
             statusText = new ToolStripStatusLabel("Ready");
@@ -330,6 +433,7 @@ namespace WorkbenchHost
             main.FixedPanel = FixedPanel.Panel1;
             main.SplitterDistance = 300;
             main.SplitterWidth = 1;
+            main.Panel1MinSize = 180;
             main.BackColor = Color.FromArgb(43, 43, 43);
             main.Panel1.BackColor = sidebarColor;
             main.Panel2.BackColor = editorColor;
@@ -337,37 +441,31 @@ namespace WorkbenchHost
             Panel activity = new Panel();
             activity.Dock = DockStyle.Left;
             activity.Width = 48;
-            activity.BackColor = windowColor;
-            string[] activityNames = { "EX", "SR" };
-            string[] activityTips = { "Explorer", "Search in current file" };
-            ToolTip tips = new ToolTip();
-            for (int i = 0; i < activityNames.Length; i++)
+            activity.BackColor = VSCodeColors.ActivityBar;
+            activity.Paint += DrawActivityBar;
+            activity.MouseMove += ActivityMouseMove;
+            activity.MouseLeave += delegate { activityHoverIndex = -1; activity.Invalidate(); };
+            activity.MouseDown += delegate(object sender, MouseEventArgs e)
             {
-                Button button = new Button();
-                button.Text = activityNames[i];
-                button.FlatStyle = FlatStyle.Flat;
-                button.FlatAppearance.BorderSize = 0;
-                button.ForeColor = i == 0 ? textColor : mutedColor;
-                button.BackColor = windowColor;
-                button.Size = new Size(48, 46);
-                button.Location = new Point(0, i * 48 + 4);
-                button.TabStop = false;
-                if (i == 0) button.Click += delegate { tree.Focus(); };
-                else button.Click += delegate { FindInCurrent(); };
-                tips.SetToolTip(button, activityTips[i]);
-                activity.Controls.Add(button);
-            }
+                if (e.Y < 48) tree.Focus();
+                else FindInCurrent();
+            };
 
             Panel explorer = new Panel();
             explorer.Dock = DockStyle.Fill;
             explorer.BackColor = sidebarColor;
             explorerTitle = new Label();
-            explorerTitle.Text = "EXPLORER  " + Path.GetFileName(workspaceDirectory).ToUpperInvariant();
+            explorerTitle.Text = "EXPLORER";
             explorerTitle.Dock = DockStyle.Top;
             explorerTitle.Height = 36;
-            explorerTitle.Padding = new Padding(12, 10, 0, 0);
-            explorerTitle.ForeColor = textColor;
-            explorerTitle.Font = new Font("Segoe UI", 8F);
+            explorerTitle.Padding = new Padding(12, 11, 0, 0);
+            explorerTitle.ForeColor = mutedColor;
+            explorerTitle.Font = new Font("Segoe UI", 8F, FontStyle.Bold);
+            explorerTitle.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                using (Pen pen = new Pen(VSCodeColors.Separator))
+                    e.Graphics.DrawLine(pen, 0, explorerTitle.Height - 1, explorerTitle.Width, explorerTitle.Height - 1);
+            };
 
             tree = new TreeView();
             tree.Dock = DockStyle.Fill;
@@ -377,9 +475,17 @@ namespace WorkbenchHost
             tree.Font = uiFont;
             tree.HideSelection = false;
             tree.ShowLines = false;
-            tree.ShowPlusMinus = true;
+            tree.ShowPlusMinus = false;
+            tree.ShowRootLines = false;
+            tree.FullRowSelect = true;
             tree.Indent = 16;
             tree.ItemHeight = 24;
+            tree.DrawMode = TreeViewDrawMode.OwnerDrawText;
+            tree.DrawNode += TreeDrawNode;
+            tree.HandleCreated += delegate
+            {
+                NativeMethods.SendMessage(tree.Handle, 0x112C, new IntPtr(0x8000), new IntPtr(0x8000));
+            };
             explorer.Controls.Add(tree);
             explorer.Controls.Add(explorerTitle);
             main.Panel1.Controls.Add(explorer);
@@ -395,20 +501,60 @@ namespace WorkbenchHost
             contentSplit.Panel2MinSize = 110;
             contentSplit.Panel2Collapsed = true;
 
-            tabs = new TabControl();
+            tabs = new DarkTabControl();
             tabs.Dock = DockStyle.Fill;
-            tabs.Padding = new Point(16, 5);
+            tabs.Padding = new Point(10, 3);
             tabs.Font = uiFont;
-            tabs.BackColor = editorColor;
+            tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
+            tabs.SizeMode = TabSizeMode.Fixed;
+            tabs.ItemSize = new Size(180, 33);
+            tabs.DrawItem += DrawTabItem;
+            tabs.MouseMove += delegate(object sender, MouseEventArgs e)
+            {
+                int hover = -1;
+                for (int i = 0; i < tabs.TabCount; i++)
+                {
+                    Rectangle r = tabs.GetTabRect(i);
+                    if (e.X >= r.Right - 29 && e.X <= r.Right - 8) hover = i;
+                }
+                if (hover != closeHoverIndex)
+                {
+                    closeHoverIndex = hover;
+                    tabs.Invalidate();
+                }
+            };
+            tabs.MouseLeave += delegate { closeHoverIndex = -1; tabs.Invalidate(); };
 
-            Label outputHeader = new Label();
-            outputHeader.Text = "OUTPUT     DEBUG CONSOLE     TERMINAL";
+            Panel outputHeader = new Panel();
             outputHeader.Dock = DockStyle.Top;
             outputHeader.Height = 30;
-            outputHeader.Padding = new Padding(12, 8, 0, 0);
             outputHeader.BackColor = windowColor;
-            outputHeader.ForeColor = textColor;
-            outputHeader.Font = new Font("Segoe UI", 8F, FontStyle.Bold);
+            outputHeader.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                using (Pen pen = new Pen(VSCodeColors.Border))
+                    e.Graphics.DrawLine(pen, 0, outputHeader.Height - 1, outputHeader.Width, outputHeader.Height - 1);
+                using (SolidBrush accent = new SolidBrush(VSCodeColors.Accent))
+                    e.Graphics.FillRectangle(accent, 12, outputHeader.Height - 3, 50, 2);
+            };
+            Label outLabel = new Label();
+            outLabel.Text = "OUTPUT";
+            outLabel.Location = new Point(12, 7);
+            outLabel.Size = new Size(60, 16);
+            outLabel.ForeColor = VSCodeColors.TextBright;
+            outLabel.Font = new Font("Segoe UI", 8F, FontStyle.Bold);
+            Label dbgLabel = new Label();
+            dbgLabel.Text = "DEBUG CONSOLE";
+            dbgLabel.Location = new Point(78, 7);
+            dbgLabel.Size = new Size(110, 16);
+            dbgLabel.ForeColor = mutedColor;
+            dbgLabel.Font = new Font("Segoe UI", 8F);
+            Label termLabel = new Label();
+            termLabel.Text = "TERMINAL";
+            termLabel.Location = new Point(194, 7);
+            termLabel.Size = new Size(80, 16);
+            termLabel.ForeColor = mutedColor;
+            termLabel.Font = new Font("Segoe UI", 8F);
+            outputHeader.Controls.AddRange(new Control[] { outLabel, dbgLabel, termLabel });
             output = new RichTextBox();
             output.Dock = DockStyle.Fill;
             output.ReadOnly = true;
@@ -423,7 +569,101 @@ namespace WorkbenchHost
             main.Panel2.Controls.Add(contentSplit);
             Controls.Add(main);
             main.BringToFront();
+            Shown += delegate
+            {
+                if (main.Width > 720) main.SplitterDistance = Math.Min(260, main.Width - 400);
+            };
             ReloadTree();
+        }
+
+        private void DrawActivityBar(object sender, PaintEventArgs e)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                Color color = i == 0 ? VSCodeColors.TextBright : VSCodeColors.ActivityInactive;
+                if (activityHoverIndex == i) color = VSCodeColors.TextBright;
+                Rectangle icon = new Rectangle(12, i * 48 + 12, 24, 24);
+                if (i == 0) IconPainter.DrawFolder(e.Graphics, icon, color);
+                else IconPainter.DrawSearch(e.Graphics, icon, color);
+                if (i == 0)
+                {
+                    using (SolidBrush b = new SolidBrush(Color.White))
+                        e.Graphics.FillRectangle(b, 0, i * 48 + 11, 2, 26);
+                }
+            }
+        }
+
+        private void ActivityMouseMove(object sender, MouseEventArgs e)
+        {
+            int index = e.Y < 48 ? 0 : (e.Y < 96 ? 1 : -1);
+            if (index != activityHoverIndex)
+            {
+                activityHoverIndex = index;
+                activityTip.SetToolTip((Control)sender, index == 0 ? "Explorer" : index == 1 ? "Search in current file" : String.Empty);
+                ((Control)sender).Invalidate();
+            }
+        }
+
+        private void TreeDrawNode(object sender, DrawTreeNodeEventArgs e)
+        {
+            bool selected = (e.State & TreeNodeStates.Selected) != 0;
+            if (selected)
+            {
+                using (SolidBrush b = new SolidBrush(VSCodeColors.Selected))
+                    e.Graphics.FillRectangle(b, 0, e.Bounds.Y, tree.ClientSize.Width, e.Bounds.Height);
+            }
+            NodeTarget target = e.Node.Tag as NodeTarget;
+            bool directory = target != null && target.IsDirectory;
+            int iconX = Math.Max(4, e.Bounds.X);
+            if (directory)
+            {
+                Color chevronColor = selected ? VSCodeColors.TextBright : VSCodeColors.TextMuted;
+                using (Pen pen = new Pen(chevronColor, 1.2F))
+                {
+                    if (e.Node.IsExpanded)
+                    {
+                        e.Graphics.DrawLine(pen, iconX, e.Bounds.Y + 9, iconX + 4, e.Bounds.Y + 13);
+                        e.Graphics.DrawLine(pen, iconX + 4, e.Bounds.Y + 13, iconX + 8, e.Bounds.Y + 9);
+                    }
+                    else
+                    {
+                        e.Graphics.DrawLine(pen, iconX + 2, e.Bounds.Y + 7, iconX + 6, e.Bounds.Y + 11);
+                        e.Graphics.DrawLine(pen, iconX + 6, e.Bounds.Y + 11, iconX + 2, e.Bounds.Y + 15);
+                    }
+                }
+                IconPainter.DrawFolder(e.Graphics, new Rectangle(iconX + 12, e.Bounds.Y + 5, 15, 15), selected ? VSCodeColors.TextBright : Color.FromArgb(220, 184, 87));
+            }
+            else IconPainter.DrawFile(e.Graphics, new Rectangle(iconX + 13, e.Bounds.Y + 5, 13, 15), selected ? VSCodeColors.TextBright : VSCodeColors.TextMuted);
+
+            Color nodeColor = selected ? VSCodeColors.TextBright : e.Node.ForeColor;
+            if (nodeColor == Color.Empty || nodeColor == SystemColors.WindowText || nodeColor == Color.Black) nodeColor = textColor;
+            TextRenderer.DrawText(e.Graphics, e.Node.Text, e.Node.NodeFont ?? tree.Font,
+                new Rectangle(iconX + 31, e.Bounds.Y, Math.Max(0, tree.ClientSize.Width - iconX - 33), e.Bounds.Height),
+                nodeColor, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+        }
+
+        private void DrawTabItem(object sender, DrawItemEventArgs e)
+        {
+            Rectangle r = tabs.GetTabRect(e.Index);
+            bool selected = e.Index == tabs.SelectedIndex;
+            using (SolidBrush b = new SolidBrush(selected ? editorColor : VSCodeColors.TabInactive))
+                e.Graphics.FillRectangle(b, r);
+            if (selected)
+            {
+                using (SolidBrush accent = new SolidBrush(VSCodeColors.Accent))
+                    e.Graphics.FillRectangle(accent, r.X, r.Y, r.Width, 2);
+            }
+
+            EditorDocument doc = tabs.TabPages[e.Index].Tag as EditorDocument;
+            string name = doc == null ? tabs.TabPages[e.Index].Text : doc.DisplayName;
+            if (doc != null && doc.Editor.Text != doc.SavedText) name += " *";
+            Color fg = selected ? VSCodeColors.TextBright : mutedColor;
+            Rectangle textRect = new Rectangle(r.X + 10, r.Y, Math.Max(0, r.Width - 38), r.Height);
+            TextRenderer.DrawText(e.Graphics, name, tabs.Font, textRect, fg,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
+                TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            Rectangle closeRect = new Rectangle(r.Right - 22, r.Y + (r.Height - 14) / 2, 14, 14);
+            IconPainter.DrawClose(e.Graphics, closeRect, closeHoverIndex == e.Index ? VSCodeColors.TextBright : mutedColor);
         }
 
         private void ReloadTree()
@@ -491,7 +731,12 @@ namespace WorkbenchHost
         private void BuildEvents()
         {
             Move += delegate { ResizeApplication(); };
-            Resize += delegate { ResizeApplication(); };
+            Resize += delegate
+            {
+                if (WindowState == FormWindowState.Maximized) MaximizedBounds = Screen.FromControl(this).WorkingArea;
+                UpdateMaximizeButton();
+                ResizeApplication();
+            };
             tree.AfterExpand += delegate(object sender, TreeViewEventArgs e)
             {
                 NodeTarget target = e.Node.Tag as NodeTarget;
@@ -533,18 +778,6 @@ namespace WorkbenchHost
                 }
             };
 
-            opacitySlider.ValueChanged += delegate
-            {
-                opacityLabel.Text = "OPACITY " + opacitySlider.Value + "%";
-                if (applicationEmbedded && NativeMethods.IsWindow(applicationHandle)) NativeMethods.SetOpacity(applicationHandle, opacitySlider.Value, originalApplicationExStyle);
-                if (applicationViewVisible) encodingStatus.Text = "Runtime  " + ApplicationModeName() + "  " + opacitySlider.Value + "%";
-            };
-            grayscaleButton.CheckedChanged += delegate
-            {
-                ApplyGrayscaleState();
-                if (applicationViewVisible) statusText.Text = grayscaleButton.Checked ? "Application attached - grayscale enabled" : "Application attached - color enabled";
-            };
-
             KeyDown += delegate(object sender, KeyEventArgs e)
             {
                 if (e.KeyCode == Keys.F10)
@@ -583,7 +816,72 @@ namespace WorkbenchHost
             watchTimer.Interval = 120;
             watchTimer.Tick += WatchTimerTick;
             watchTimer.Start();
+            Activated += delegate { RepaintCustomChrome(); };
+            Deactivate += delegate { RepaintCustomChrome(); };
             FormClosing += MainFormClosing;
+        }
+
+        private void RepaintCustomChrome()
+        {
+            if (titleBar == null || titleBar.IsDisposed) return;
+            titleBar.Invalidate(true);
+            titleBar.Update();
+        }
+
+        private void UpdateMaximizeButton()
+        {
+            if (maxButton != null)
+                maxButton.ButtonKind = WindowState == FormWindowState.Maximized ? TitleBarButton.Kind.Restore : TitleBarButton.Kind.Maximize;
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.Style |= 0x00040000; // WS_THICKFRAME: keep the window resizable and shadowed
+                return cp;
+            }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == 0x0085) // WM_NCPAINT: Windows must not paint over the custom title bar
+            {
+                m.Result = IntPtr.Zero;
+                return;
+            }
+            if (m.Msg == 0x0086) // WM_NCACTIVATE: keep the entire title bar client-drawn
+            {
+                m.Result = new IntPtr(1);
+                if (IsHandleCreated) BeginInvoke((MethodInvoker)RepaintCustomChrome);
+                return;
+            }
+            if (m.Msg == 0x0084 && WindowState == FormWindowState.Normal) // WM_NCHITTEST
+            {
+                base.WndProc(ref m);
+                Point cursor = PointToClient(new Point((short)(m.LParam.ToInt64() & 0xffff), (short)((m.LParam.ToInt64() >> 16) & 0xffff)));
+                const int grip = 6;
+                bool left = cursor.X < grip;
+                bool right = cursor.X >= ClientSize.Width - grip;
+                bool top = cursor.Y < grip;
+                bool bottom = cursor.Y >= ClientSize.Height - grip;
+                if (left && top) m.Result = new IntPtr(13);       // HTTOPLEFT
+                else if (right && top) m.Result = new IntPtr(14); // HTTOPRIGHT
+                else if (left && bottom) m.Result = new IntPtr(16); // HTBOTTOMLEFT
+                else if (right && bottom) m.Result = new IntPtr(17); // HTBOTTOMRIGHT
+                else if (left) m.Result = new IntPtr(10);         // HTLEFT
+                else if (right) m.Result = new IntPtr(11);        // HTRIGHT
+                else if (top) m.Result = new IntPtr(12);          // HTTOP
+                else if (bottom) m.Result = new IntPtr(15);       // HTBOTTOM
+                return;
+            }
+            if (m.Msg == 0x0083) // WM_NCCALCSIZE: remove the standard border while keeping resize support
+            {
+                m.Result = IntPtr.Zero;
+                return;
+            }
+            base.WndProc(ref m);
         }
 
         private void OpenTreeTarget(TreeNode node)
@@ -620,10 +918,10 @@ namespace WorkbenchHost
             document.Path = fullPath;
             document.DisplayName = displayName;
             document.IsTrigger = isTrigger || String.Equals(fullPath, triggerPath, StringComparison.OrdinalIgnoreCase);
-            document.SavedText = text;
             document.Editor = NewEditor(false);
             document.SuppressChanges = true;
             document.Editor.Text = text;
+            document.SavedText = document.Editor.Text;
             HighlightEditor(document.Editor, Path.GetExtension(fullPath).ToLowerInvariant());
             document.SuppressChanges = false;
             document.Editor.Modified = false;
@@ -762,7 +1060,6 @@ namespace WorkbenchHost
             applicationHost.BringToFront();
             applicationHost.Invalidate();
             applicationViewVisible = true;
-            pathLabel.Text = "  " + profile.Id + " / " + Path.GetFileName(triggerPath);
             encodingStatus.Text = "Runtime  Auto  " + opacitySlider.Value + "%";
             statusText.Text = "Waiting for application window...";
 
@@ -1053,8 +1350,7 @@ namespace WorkbenchHost
             {
                 workspaceDirectory = Path.GetFullPath(dialog.SelectedPath);
                 ReloadTree();
-                explorerTitle.Text = "EXPLORER  " + Path.GetFileName(workspaceDirectory).ToUpperInvariant();
-                pathLabel.Text = "  " + RelativePath(workspaceDirectory);
+                explorerTitle.Text = "EXPLORER";
                 statusText.Text = "Workspace opened: " + workspaceDirectory;
                 SaveSessionState();
             }
@@ -1162,6 +1458,15 @@ namespace WorkbenchHost
             document.Editor.Focus();
         }
 
+        private static void StyleDialogButton(Button button, bool primary)
+        {
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 0;
+            button.FlatAppearance.MouseOverBackColor = primary ? VSCodeColors.Accent : VSCodeColors.Hover;
+            button.BackColor = primary ? VSCodeColors.AccentDark : VSCodeColors.Input;
+            button.ForeColor = VSCodeColors.TextBright;
+        }
+
         private string PromptForText(string title, string labelText, string initialValue)
         {
             Form dialog = new Form();
@@ -1172,27 +1477,33 @@ namespace WorkbenchHost
             dialog.MaximizeBox = false;
             dialog.ShowInTaskbar = false;
             dialog.ClientSize = new Size(420, 118);
-            dialog.BackColor = windowColor;
+            dialog.BackColor = sidebarColor;
             dialog.ForeColor = textColor;
 
             Label label = new Label();
             label.Text = labelText;
             label.Location = new Point(12, 12);
             label.AutoSize = true;
+            label.ForeColor = textColor;
             TextBox input = new TextBox();
             input.Text = initialValue ?? String.Empty;
             input.Location = new Point(12, 36);
             input.Width = 396;
+            input.BackColor = VSCodeColors.Input;
+            input.ForeColor = VSCodeColors.TextBright;
+            input.BorderStyle = BorderStyle.FixedSingle;
             Button ok = new Button();
             ok.Text = "OK";
             ok.DialogResult = DialogResult.OK;
             ok.Location = new Point(252, 76);
             ok.Width = 75;
+            StyleDialogButton(ok, true);
             Button cancel = new Button();
             cancel.Text = "Cancel";
             cancel.DialogResult = DialogResult.Cancel;
             cancel.Location = new Point(333, 76);
             cancel.Width = 75;
+            StyleDialogButton(cancel, false);
             dialog.Controls.AddRange(new Control[] { label, input, ok, cancel });
             dialog.AcceptButton = ok;
             dialog.CancelButton = cancel;
@@ -1285,9 +1596,6 @@ namespace WorkbenchHost
         private void UpdatePathStatus(EditorDocument document)
         {
             if (document == null) return;
-            pathLabel.Text = document.Path == null
-                ? "  " + document.DisplayName
-                : "  " + RelativePath(document.Path).Replace("\\", " / ");
             string extension = Path.GetExtension(document.Path ?? document.DisplayName).TrimStart('.').ToUpperInvariant();
             encodingStatus.Text = "UTF-8  LF  " + extension;
             UpdateCursorStatus(document.Editor);
