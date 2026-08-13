@@ -699,15 +699,11 @@ namespace WorkbenchHost
                         e.Graphics.DrawLine(pen, iconX + 6, e.Bounds.Y + 11, iconX + 2, e.Bounds.Y + 15);
                     }
                 }
-                IconPainter.DrawCodicon(e.Graphics, new Rectangle(iconX + 11, e.Bounds.Y + 3, 18, 18),
-                    e.Node.IsExpanded ? IconPainter.Codicon.FolderOpened : IconPainter.Codicon.Folder,
-                    selected ? VSCodeColors.TextBright : Color.FromArgb(220, 184, 87), 16F);
             }
             else
             {
-                string extension = target == null ? String.Empty : Path.GetExtension(target.Path);
-                IconPainter.DrawCodicon(e.Graphics, new Rectangle(iconX + 11, e.Bounds.Y + 3, 18, 18),
-                    IconPainter.Codicon.File, selected ? VSCodeColors.TextBright : IconPainter.FileColor(extension), 16F);
+                IconPainter.DrawSetiFile(e.Graphics, new Rectangle(iconX + 8, e.Bounds.Y + 2, 21, 20),
+                    target == null ? e.Node.Text : target.Path, selected);
             }
 
             Color nodeColor = selected ? VSCodeColors.TextBright : e.Node.ForeColor;

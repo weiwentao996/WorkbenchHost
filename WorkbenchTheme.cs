@@ -277,8 +277,11 @@ namespace WorkbenchHost
     internal static class IconPainter
     {
         private static readonly PrivateFontCollection CodiconFonts = new PrivateFontCollection();
+        private static readonly PrivateFontCollection SetiFonts = new PrivateFontCollection();
         private static FontFamily codiconFamily;
+        private static FontFamily setiFamily;
         private static IntPtr codiconMemory = IntPtr.Zero;
+        private static IntPtr setiMemory = IntPtr.Zero;
 
         internal enum Codicon
         {
@@ -288,7 +291,7 @@ namespace WorkbenchHost
             Files = 0xeaf0,
             File = 0xea7b,
             Folder = 0xea83,
-            FolderOpened = 0xea84,
+            FolderOpened = 0xeaf7,
             Run = 0xeb2c,
             Settings = 0xeb51,
             Account = 0xeb99
@@ -321,8 +324,30 @@ namespace WorkbenchHost
                     if (File.Exists(path)) CodiconFonts.AddFontFile(path);
                 }
                 if (CodiconFonts.Families.Length > 0) codiconFamily = CodiconFonts.Families[0];
+                setiMemory = LoadEmbeddedFont("WorkbenchHost.seti.ttf", SetiFonts);
+                if (SetiFonts.Families.Length > 0) setiFamily = SetiFonts.Families[0];
             }
             catch { codiconFamily = null; }
+        }
+
+        private static IntPtr LoadEmbeddedFont(string resourceName, PrivateFontCollection fonts)
+        {
+            using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
+            {
+                if (stream == null) return IntPtr.Zero;
+                byte[] bytes = new byte[stream.Length];
+                int offset = 0;
+                while (offset < bytes.Length)
+                {
+                    int read = stream.Read(bytes, offset, bytes.Length - offset);
+                    if (read == 0) break;
+                    offset += read;
+                }
+                IntPtr memory = Marshal.AllocCoTaskMem(bytes.Length);
+                Marshal.Copy(bytes, 0, memory, bytes.Length);
+                fonts.AddMemoryFont(memory, bytes.Length);
+                return memory;
+            }
         }
 
         internal static void DrawCodicon(Graphics g, Rectangle bounds, Codicon icon, Color color, float size)
@@ -340,6 +365,51 @@ namespace WorkbenchHost
                 float y = bounds.Top + (bounds.Height - measured.Height) / 2F;
                 g.DrawString(glyph, font, brush, new PointF(x, y), format);
             }
+        }
+
+        internal static void DrawSetiFile(Graphics g, Rectangle bounds, string path, bool selected)
+        {
+            if (setiFamily == null)
+            {
+                DrawCodicon(g, bounds, Codicon.File, selected ? VSCodeColors.TextBright : VSCodeColors.TextMuted, 16F);
+                return;
+            }
+            int glyph;
+            Color color;
+            SetiFileStyle(path, out glyph, out color);
+            if (selected) color = VSCodeColors.TextBright;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            using (Font font = new Font(setiFamily, 20F, FontStyle.Regular, GraphicsUnit.Pixel))
+            using (SolidBrush brush = new SolidBrush(color))
+            using (StringFormat format = new StringFormat(StringFormat.GenericTypographic))
+            {
+                format.FormatFlags |= StringFormatFlags.NoClip;
+                string character = Convert.ToChar(glyph).ToString();
+                SizeF measured = g.MeasureString(character, font, PointF.Empty, format);
+                g.DrawString(character, font, brush,
+                    new PointF(bounds.Left + (bounds.Width - measured.Width) / 2F,
+                        bounds.Top + (bounds.Height - measured.Height) / 2F), format);
+            }
+        }
+
+        private static void SetiFileStyle(string path, out int glyph, out Color color)
+        {
+            string name = Path.GetFileName(path ?? String.Empty).ToLowerInvariant();
+            string extension = Path.GetExtension(name).ToLowerInvariant();
+            glyph = 0xe023; color = Color.FromArgb(212, 215, 214); // default
+            if (name == ".gitignore" || name == ".dockerignore") { glyph = 0xe034; color = Color.FromArgb(65, 83, 91); }
+            else if (name == "dockerfile") { glyph = 0xe025; color = Color.FromArgb(81, 154, 186); }
+            else if (name == "makefile") { glyph = 0xe05f; color = Color.FromArgb(227, 121, 51); }
+            else if (extension == ".cs") { glyph = 0xe00b; color = Color.FromArgb(81, 154, 186); }
+            else if (extension == ".go") { glyph = 0xe03a; color = Color.FromArgb(81, 154, 186); }
+            else if (extension == ".json") { glyph = 0xe055; color = Color.FromArgb(203, 203, 65); }
+            else if (extension == ".yaml" || extension == ".yml") { glyph = 0xe0a7; color = Color.FromArgb(160, 116, 196); }
+            else if (extension == ".md" || extension == ".markdown") { glyph = 0xe060; color = Color.FromArgb(81, 154, 186); }
+            else if (extension == ".cmd" || extension == ".bat" || extension == ".exe") { glyph = 0xe0a2; color = Color.FromArgb(81, 154, 186); }
+            else if (extension == ".ps1") { glyph = 0xe074; color = Color.FromArgb(81, 154, 186); }
+            else if (extension == ".sh") { glyph = 0xe089; color = Color.FromArgb(141, 193, 73); }
+            else if (extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".gif" || extension == ".svg" || extension == ".ico") { glyph = 0xe04c; color = Color.FromArgb(160, 116, 196); }
+            else if (extension == ".ttf" || extension == ".woff" || extension == ".woff2") { glyph = 0xe033; color = Color.FromArgb(204, 62, 68); }
         }
 
         internal static void DrawFolder(Graphics g, Rectangle r, Color color)
