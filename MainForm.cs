@@ -81,6 +81,8 @@ namespace WorkbenchHost
         private System.Windows.Forms.Timer watchTimer;
         private int activityHoverIndex = -1;
         private int closeHoverIndex = -1;
+        private bool updatingTabLayout;
+        private bool tabOverflowUpdatePending;
         private readonly ToolTip activityTip = new ToolTip();
 
         private readonly Dictionary<string, EditorDocument> openDocuments = new Dictionary<string, EditorDocument>(StringComparer.OrdinalIgnoreCase);
@@ -586,7 +588,10 @@ namespace WorkbenchHost
             tabs.SizeMode = TabSizeMode.Fixed;
             tabs.ItemSize = new Size(180, 33);
             tabs.DrawItem += DrawTabItem;
-            tabs.HandleCreated += delegate { UpdateTabLayout(); };
+            tabs.HandleCreated += delegate
+            {
+                if (IsHandleCreated) BeginInvoke((MethodInvoker)UpdateTabLayout);
+            };
             tabs.Resize += delegate { UpdateTabLayout(); };
             tabs.ControlAdded += delegate { UpdateTabLayout(); };
             tabs.ControlRemoved += delegate { UpdateTabLayout(); };
@@ -660,12 +665,25 @@ namespace WorkbenchHost
 
         private void UpdateTabLayout()
         {
-            if (tabs == null || tabs.IsDisposed) return;
-            int count = Math.Max(1, tabs.TabCount);
-            int available = Math.Max(1, tabs.ClientSize.Width - 4);
-            int width = Math.Max(92, Math.Min(180, available / count));
-            if (tabs.ItemSize.Width != width) tabs.ItemSize = new Size(width, 33);
-            NativeMethods.HideTabOverflowButtons(tabs.Handle);
+            if (tabs == null || tabs.IsDisposed || updatingTabLayout) return;
+            updatingTabLayout = true;
+            try
+            {
+                int count = Math.Max(1, tabs.TabCount);
+                int available = Math.Max(1, tabs.ClientSize.Width - 4);
+                int width = Math.Max(92, Math.Min(180, available / count));
+                if (tabs.ItemSize.Width != width) tabs.ItemSize = new Size(width, 33);
+            }
+            finally { updatingTabLayout = false; }
+
+            if (!tabs.IsHandleCreated || tabOverflowUpdatePending) return;
+            tabOverflowUpdatePending = true;
+            BeginInvoke((MethodInvoker)delegate
+            {
+                tabOverflowUpdatePending = false;
+                if (tabs != null && !tabs.IsDisposed && tabs.IsHandleCreated)
+                    NativeMethods.HideTabOverflowButtons(tabs.Handle);
+            });
         }
 
         private void DrawActivityBar(object sender, PaintEventArgs e)
