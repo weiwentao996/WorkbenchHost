@@ -348,6 +348,9 @@ namespace WorkbenchHost
             minButton = new TitleBarButton(TitleBarButton.Kind.Minimize);
             maxButton = new TitleBarButton(TitleBarButton.Kind.Maximize);
             closeButton = new TitleBarButton(TitleBarButton.Kind.Close);
+            minButton.Margin = new Padding(0);
+            maxButton.Margin = new Padding(0);
+            closeButton.Margin = new Padding(0);
             minButton.Clicked += delegate { WindowState = FormWindowState.Minimized; };
             maxButton.Clicked += delegate { ToggleMaximize(); };
             closeButton.Clicked += delegate { Close(); };
@@ -802,6 +805,7 @@ namespace WorkbenchHost
 
         private void BuildEvents()
         {
+            HandleCreated += delegate { NativeMethods.ApplyDarkWindowBorder(Handle, VSCodeColors.TitleBar); };
             Move += delegate { ResizeApplication(); };
             Resize += delegate
             {

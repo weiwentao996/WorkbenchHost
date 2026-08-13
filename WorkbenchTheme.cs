@@ -3,6 +3,8 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace WorkbenchHost
@@ -276,6 +278,7 @@ namespace WorkbenchHost
     {
         private static readonly PrivateFontCollection CodiconFonts = new PrivateFontCollection();
         private static FontFamily codiconFamily;
+        private static IntPtr codiconMemory = IntPtr.Zero;
 
         internal enum Codicon
         {
@@ -293,11 +296,30 @@ namespace WorkbenchHost
 
         internal static void InitializeCodicons(string applicationRoot)
         {
-            string path = Path.Combine(applicationRoot, "assets", "codicon.ttf");
-            if (!File.Exists(path)) return;
             try
             {
-                CodiconFonts.AddFontFile(path);
+                using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("WorkbenchHost.codicon.ttf"))
+                {
+                    if (stream != null)
+                    {
+                        byte[] bytes = new byte[stream.Length];
+                        int offset = 0;
+                        while (offset < bytes.Length)
+                        {
+                            int read = stream.Read(bytes, offset, bytes.Length - offset);
+                            if (read == 0) break;
+                            offset += read;
+                        }
+                        codiconMemory = Marshal.AllocCoTaskMem(bytes.Length);
+                        Marshal.Copy(bytes, 0, codiconMemory, bytes.Length);
+                        CodiconFonts.AddMemoryFont(codiconMemory, bytes.Length);
+                    }
+                }
+                if (CodiconFonts.Families.Length == 0)
+                {
+                    string path = Path.Combine(applicationRoot, "assets", "codicon.ttf");
+                    if (File.Exists(path)) CodiconFonts.AddFontFile(path);
+                }
                 if (CodiconFonts.Families.Length > 0) codiconFamily = CodiconFonts.Families[0];
             }
             catch { codiconFamily = null; }
@@ -311,9 +333,12 @@ namespace WorkbenchHost
             using (SolidBrush brush = new SolidBrush(color))
             using (StringFormat format = new StringFormat(StringFormat.GenericTypographic))
             {
-                format.Alignment = StringAlignment.Center;
-                format.LineAlignment = StringAlignment.Center;
-                g.DrawString(Convert.ToChar((int)icon).ToString(), font, brush, bounds, format);
+                format.FormatFlags |= StringFormatFlags.NoClip;
+                string glyph = Convert.ToChar((int)icon).ToString();
+                SizeF measured = g.MeasureString(glyph, font, PointF.Empty, format);
+                float x = bounds.Left + (bounds.Width - measured.Width) / 2F;
+                float y = bounds.Top + (bounds.Height - measured.Height) / 2F;
+                g.DrawString(glyph, font, brush, new PointF(x, y), format);
             }
         }
 

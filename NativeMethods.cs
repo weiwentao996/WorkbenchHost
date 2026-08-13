@@ -96,6 +96,9 @@ namespace WorkbenchHost
         [DllImport("dwmapi.dll")]
         private static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out int value, int valueSize);
 
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hWnd, int attribute, ref int value, int valueSize);
+
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         private static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
 
@@ -143,6 +146,17 @@ namespace WorkbenchHost
             {
                 SetWindowTheme(handle, "DarkMode_Explorer", null);
                 SendMessage(handle, 0x031A, IntPtr.Zero, IntPtr.Zero); // WM_THEMECHANGED
+            }
+            catch { }
+        }
+
+        internal static void ApplyDarkWindowBorder(IntPtr handle, Color color)
+        {
+            if (handle == IntPtr.Zero) return;
+            try
+            {
+                int colorRef = color.R | (color.G << 8) | (color.B << 16);
+                DwmSetWindowAttribute(handle, 34, ref colorRef, sizeof(int)); // DWMWA_BORDER_COLOR
             }
             catch { }
         }
