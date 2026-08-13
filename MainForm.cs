@@ -996,18 +996,19 @@ namespace WorkbenchHost
             document.Editor = NewEditor(false);
             document.SuppressChanges = true;
             document.Editor.Text = text;
-            document.SavedText = document.Editor.Text;
             HighlightEditor(document.Editor, Path.GetExtension(fullPath).ToLowerInvariant());
-            document.SuppressChanges = false;
-            document.Editor.Modified = false;
-            document.Editor.SelectionChanged += delegate { UpdateCursorStatus(document.Editor); if (document.Gutter != null) document.Gutter.Invalidate(); };
-            document.Editor.TextChanged += delegate { DocumentTextChanged(document); };
             document.Tab = new TabPage(displayName + "  x");
             document.Tab.Tag = document;
             document.Tab.BackColor = editorColor;
             BuildEditorSurface(document);
             document.Tab.Controls.Add(document.Surface);
             tabs.TabPages.Add(document.Tab);
+            IntPtr editorHandle = document.Editor.Handle; // RichEdit normalizes line endings when its native handle is created.
+            document.SavedText = document.Editor.Text;
+            document.Editor.Modified = false;
+            document.SuppressChanges = false;
+            document.Editor.SelectionChanged += delegate { UpdateCursorStatus(document.Editor); if (document.Gutter != null) document.Gutter.Invalidate(); };
+            document.Editor.TextChanged += delegate { DocumentTextChanged(document); };
             openDocuments[fullPath] = document;
             if (document.IsTrigger) triggerDocument = document;
             tabs.SelectedTab = document.Tab;
