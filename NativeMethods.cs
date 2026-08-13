@@ -85,6 +85,9 @@ namespace WorkbenchHost
         private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
 
         [DllImport("user32.dll")]
+        private static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr lParam);
+
+        [DllImport("user32.dll")]
         internal static extern IntPtr GetParent(IntPtr hWnd);
 
         [DllImport("user32.dll")]
@@ -138,6 +141,21 @@ namespace WorkbenchHost
         private static bool magnificationInitialized;
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        internal static void HideTabOverflowButtons(IntPtr tab)
+        {
+            if (tab == IntPtr.Zero) return;
+            EnumChildWindows(tab, delegate(IntPtr child, IntPtr lParam)
+            {
+                StringBuilder className = new StringBuilder(64);
+                GetClassName(child, className, className.Capacity);
+                string name = className.ToString();
+                if (String.Equals(name, "ToolbarWindow32", StringComparison.OrdinalIgnoreCase) ||
+                    String.Equals(name, "msctls_updown32", StringComparison.OrdinalIgnoreCase))
+                    ShowWindow(child, SW_HIDE);
+                return true;
+            }, IntPtr.Zero);
+        }
 
         internal static void ApplyDarkControlTheme(IntPtr handle)
         {

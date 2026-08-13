@@ -586,6 +586,10 @@ namespace WorkbenchHost
             tabs.SizeMode = TabSizeMode.Fixed;
             tabs.ItemSize = new Size(180, 33);
             tabs.DrawItem += DrawTabItem;
+            tabs.HandleCreated += delegate { UpdateTabLayout(); };
+            tabs.Resize += delegate { UpdateTabLayout(); };
+            tabs.ControlAdded += delegate { UpdateTabLayout(); };
+            tabs.ControlRemoved += delegate { UpdateTabLayout(); };
             tabs.MouseMove += delegate(object sender, MouseEventArgs e)
             {
                 int hover = -1;
@@ -652,6 +656,16 @@ namespace WorkbenchHost
                 if (main.Width > 720) main.SplitterDistance = Math.Min(260, main.Width - 400);
             };
             ReloadTree();
+        }
+
+        private void UpdateTabLayout()
+        {
+            if (tabs == null || tabs.IsDisposed) return;
+            int count = Math.Max(1, tabs.TabCount);
+            int available = Math.Max(1, tabs.ClientSize.Width - 4);
+            int width = Math.Max(92, Math.Min(180, available / count));
+            if (tabs.ItemSize.Width != width) tabs.ItemSize = new Size(width, 33);
+            NativeMethods.HideTabOverflowButtons(tabs.Handle);
         }
 
         private void DrawActivityBar(object sender, PaintEventArgs e)
