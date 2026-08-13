@@ -138,6 +138,14 @@ namespace WorkbenchHost
         private void InitializeWindow()
         {
             Text = profiles.Count == 1 ? profile.WindowTitle : "workspace - Code";
+            try
+            {
+                Icon executableIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (executableIcon != null) Icon = (Icon)executableIcon.Clone();
+                if (executableIcon != null) executableIcon.Dispose();
+            }
+            catch { }
+            ShowIcon = true;
             FormBorderStyle = FormBorderStyle.None;
             BackColor = windowColor;
             ForeColor = textColor;
