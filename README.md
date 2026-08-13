@@ -95,6 +95,8 @@ Relative paths are resolved from the directory containing `WorkbenchHost.exe`. O
 
 At runtime, the host first tries native Win32 embedding and verifies the resulting parent relationship. If the target rejects reparenting or changes its parent later, the host automatically switches to a borderless overlay that follows the editor surface. Protected, elevated, exclusive-fullscreen, and capture-blocked windows may still require external mode.
 
+When a hosted application recreates its window or restores fullscreen styles after `Win+Tab`, the host hides the detached window, removes its separate task-switcher entry, and attempts to embed it again before falling back to overlay mode.
+
 The legacy `virtualFileName`, `virtualSource`, and `files` fields are retained only for backward compatibility. The real editor does not use them; omit them from new profiles.
 
 ## Build and Compatibility

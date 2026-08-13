@@ -19,6 +19,7 @@ namespace WorkbenchHost
         internal const long WS_MAXIMIZEBOX = 0x00010000L;
         internal const long WS_SYSMENU = 0x00080000L;
         internal const long WS_EX_TOOLWINDOW = 0x00000080L;
+        internal const long WS_EX_APPWINDOW = 0x00040000L;
         internal const long WS_EX_LAYERED = 0x00080000L;
         internal const uint LWA_ALPHA = 0x2;
         internal const uint SWP_NOZORDER = 0x0004;
@@ -92,6 +93,12 @@ namespace WorkbenchHost
 
         [DllImport("user32.dll")]
         internal static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        internal static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        internal static extern IntPtr SetFocus(IntPtr hWnd);
 
         [DllImport("user32.dll")]
         private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
@@ -217,26 +224,43 @@ namespace WorkbenchHost
             else SetWindowLong32(hWnd, index, pointer);
         }
 
-        internal static bool TryEmbed(IntPtr child, IntPtr host, out long originalStyle)
+        internal static bool TryEmbed(IntPtr child, IntPtr host, out long originalStyle, out long originalExStyle)
         {
             originalStyle = GetStyle(child, GWL_STYLE);
+            originalExStyle = GetStyle(child, GWL_EXSTYLE);
             long chrome = WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU;
             SetParent(child, host);
             SetStyle(child, GWL_STYLE, (originalStyle & ~chrome) | WS_CHILD);
+            PrepareHostedExStyle(child, originalExStyle);
             SetWindowPos(child, IntPtr.Zero, 0, 0, 1, 1, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
             if (GetParent(child) == host && (GetStyle(child, GWL_STYLE) & WS_CHILD) != 0) return true;
             SetParent(child, IntPtr.Zero);
             SetStyle(child, GWL_STYLE, originalStyle);
+            SetStyle(child, GWL_EXSTYLE, originalExStyle);
             return false;
         }
 
-        internal static void PrepareOverlay(IntPtr window, long originalStyle, IntPtr owner)
+        internal static void PrepareOverlay(IntPtr window, long originalStyle, long originalExStyle, IntPtr owner)
         {
             long chrome = WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_CHILD;
             SetParent(window, IntPtr.Zero);
             SetStyle(window, GWL_HWNDPARENT, owner.ToInt64());
             SetStyle(window, GWL_STYLE, (originalStyle & ~chrome) | WS_POPUP);
+            PrepareHostedExStyle(window, originalExStyle);
             SetWindowPos(window, IntPtr.Zero, 0, 0, 1, 1, SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        }
+
+        internal static void PrepareHostedExStyle(IntPtr window, long originalExStyle)
+        {
+            SetStyle(window, GWL_EXSTYLE, (originalExStyle & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW);
+        }
+
+        internal static bool IsEmbeddedIn(IntPtr window, IntPtr host)
+        {
+            if (!IsWindow(window) || GetParent(window) != host) return false;
+            long style = GetStyle(window, GWL_STYLE);
+            long exStyle = GetStyle(window, GWL_EXSTYLE);
+            return (style & WS_CHILD) != 0 && (style & WS_POPUP) == 0 && (exStyle & WS_EX_APPWINDOW) == 0;
         }
 
         internal static void PositionOverlay(IntPtr window, Rectangle bounds)
@@ -245,11 +269,12 @@ namespace WorkbenchHost
             SetWindowPos(window, IntPtr.Zero, bounds.X, bounds.Y, bounds.Width, bounds.Height, SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         }
 
-        internal static void RestoreTopLevelWindow(IntPtr window, long originalStyle, long originalOwner)
+        internal static void RestoreTopLevelWindow(IntPtr window, long originalStyle, long originalExStyle, long originalOwner)
         {
             SetParent(window, IntPtr.Zero);
             SetStyle(window, GWL_HWNDPARENT, originalOwner);
             SetStyle(window, GWL_STYLE, originalStyle);
+            SetStyle(window, GWL_EXSTYLE, originalExStyle);
             SetWindowPos(window, IntPtr.Zero, 100, 100, 1280, 720, SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         }
 
@@ -259,11 +284,16 @@ namespace WorkbenchHost
             SetWindowPos(child, IntPtr.Zero, 0, 0, width, height, SWP_NOZORDER | SWP_SHOWWINDOW);
         }
 
-        internal static void SetOpacity(IntPtr child, int percent)
+        internal static void SetOpacity(IntPtr child, int percent, long originalExStyle)
         {
             percent = Math.Max(0, Math.Min(100, percent));
-            byte alpha = (byte)Math.Round(255.0 * percent / 100.0);
             long style = GetStyle(child, GWL_EXSTYLE);
+            if (percent == 100 && (originalExStyle & WS_EX_LAYERED) == 0)
+            {
+                SetStyle(child, GWL_EXSTYLE, style & ~WS_EX_LAYERED);
+                return;
+            }
+            byte alpha = (byte)Math.Round(255.0 * percent / 100.0);
             SetStyle(child, GWL_EXSTYLE, style | WS_EX_LAYERED);
             SetLayeredWindowAttributes(child, 0, alpha, LWA_ALPHA);
         }

@@ -77,6 +77,7 @@ namespace WorkbenchHost
         private Process applicationProcess;
         private IntPtr applicationHandle = IntPtr.Zero;
         private long originalApplicationStyle;
+        private long originalApplicationExStyle;
         private long originalApplicationOwner;
         private bool applicationEmbedded;
         private bool applicationOverlay;
@@ -85,6 +86,8 @@ namespace WorkbenchHost
         private bool f10WasDown;
         private bool focusProtection;
         private int focusAwayTicks;
+        private int hostingRecoveryAttempts;
+        private DateTime lastHostingRecoveryUtc = DateTime.MinValue;
         private bool suppressTabSwitch;
         private bool restoringSession;
 
@@ -533,7 +536,7 @@ namespace WorkbenchHost
             opacitySlider.ValueChanged += delegate
             {
                 opacityLabel.Text = "OPACITY " + opacitySlider.Value + "%";
-                if (applicationEmbedded && NativeMethods.IsWindow(applicationHandle)) NativeMethods.SetOpacity(applicationHandle, opacitySlider.Value);
+                if (applicationEmbedded && NativeMethods.IsWindow(applicationHandle)) NativeMethods.SetOpacity(applicationHandle, opacitySlider.Value, originalApplicationExStyle);
                 if (applicationViewVisible) encodingStatus.Text = "Runtime  " + ApplicationModeName() + "  " + opacitySlider.Value + "%";
             };
             grayscaleButton.CheckedChanged += delegate
@@ -768,7 +771,7 @@ namespace WorkbenchHost
                 StartAndEmbedApplication();
                 NativeMethods.ShowWindow(applicationHandle, NativeMethods.SW_SHOW);
                 ResizeApplication();
-                NativeMethods.SetOpacity(applicationHandle, opacitySlider.Value);
+                NativeMethods.SetOpacity(applicationHandle, opacitySlider.Value, originalApplicationExStyle);
                 ApplyGrayscaleState();
                 encodingStatus.Text = "Runtime  " + ApplicationModeName() + "  " + opacitySlider.Value + "%";
                 statusText.Text = applicationOverlay
@@ -794,6 +797,8 @@ namespace WorkbenchHost
             applicationHandle = IntPtr.Zero;
             applicationEmbedded = false;
             applicationOverlay = false;
+            hostingRecoveryAttempts = 0;
+            lastHostingRecoveryUtc = DateTime.MinValue;
             applicationViewVisible = false;
             grayscaleButton.Checked = false;
             ApplyGrayscaleState();
@@ -898,10 +903,10 @@ namespace WorkbenchHost
             if (applicationHandle == IntPtr.Zero) throw new TimeoutException("Application window was not available within " + profile.LaunchTimeoutSeconds + " seconds.");
 
             originalApplicationOwner = NativeMethods.GetStyle(applicationHandle, NativeMethods.GWL_HWNDPARENT);
-            applicationOverlay = !NativeMethods.TryEmbed(applicationHandle, applicationHost.Handle, out originalApplicationStyle);
+            applicationOverlay = !NativeMethods.TryEmbed(applicationHandle, applicationHost.Handle, out originalApplicationStyle, out originalApplicationExStyle);
             if (applicationOverlay)
             {
-                NativeMethods.PrepareOverlay(applicationHandle, originalApplicationStyle, Handle);
+                NativeMethods.PrepareOverlay(applicationHandle, originalApplicationStyle, originalApplicationExStyle, Handle);
                 WriteOutput("Native embedding was rejected; using compatible overlay mode.");
             }
             applicationEmbedded = true;
@@ -1327,12 +1332,9 @@ namespace WorkbenchHost
             {
                 try
                 {
-                    if (!applicationOverlay && applicationHost != null && NativeMethods.IsWindow(applicationHandle) && NativeMethods.GetParent(applicationHandle) != applicationHost.Handle)
+                    if (!applicationOverlay && applicationHost != null && !NativeMethods.IsEmbeddedIn(applicationHandle, applicationHost.Handle))
                     {
-                        NativeMethods.PrepareOverlay(applicationHandle, originalApplicationStyle, Handle);
-                        applicationOverlay = true;
-                        WriteOutput("Application left its embedded parent; switched to compatible overlay mode.");
-                        encodingStatus.Text = "Runtime  Overlay  " + opacitySlider.Value + "%";
+                        RecoverApplicationWindow();
                     }
                     if (applicationOverlay && applicationViewVisible) ResizeApplication();
                     if (!applicationProcess.HasExited) return;
@@ -1345,6 +1347,60 @@ namespace WorkbenchHost
                 }
                 catch { }
             }
+        }
+
+        private void RecoverApplicationWindow()
+        {
+            if (applicationProcess == null || applicationHost == null) return;
+
+            IntPtr candidate = NativeMethods.FindTopLevelWindow((uint)applicationProcess.Id, profile.WindowClass);
+            if (candidate == IntPtr.Zero && NativeMethods.IsWindow(applicationHandle)) candidate = applicationHandle;
+            if (candidate == IntPtr.Zero)
+            {
+                return;
+            }
+
+            NativeMethods.ShowWindow(candidate, NativeMethods.SW_HIDE);
+            long recoveredOwner = NativeMethods.GetStyle(candidate, NativeMethods.GWL_HWNDPARENT);
+            long recoveredStyle;
+            long recoveredExStyle;
+            DateTime now = DateTime.UtcNow;
+            if ((now - lastHostingRecoveryUtc).TotalSeconds > 5) hostingRecoveryAttempts = 0;
+            lastHostingRecoveryUtc = now;
+            hostingRecoveryAttempts++;
+            if (hostingRecoveryAttempts < 8 && NativeMethods.TryEmbed(candidate, applicationHost.Handle, out recoveredStyle, out recoveredExStyle))
+            {
+                applicationHandle = candidate;
+                originalApplicationStyle = recoveredStyle;
+                originalApplicationExStyle = recoveredExStyle;
+                originalApplicationOwner = recoveredOwner;
+                applicationOverlay = false;
+                NativeMethods.PrepareHostedExStyle(candidate, originalApplicationExStyle);
+                if (applicationViewVisible) NativeMethods.ShowWindow(candidate, NativeMethods.SW_SHOW);
+                ResizeApplication();
+                NativeMethods.SetOpacity(candidate, opacitySlider.Value, originalApplicationExStyle);
+                NativeMethods.SetForegroundWindow(Handle);
+                NativeMethods.SetFocus(applicationHost.Handle);
+                statusText.Text = "Application re-embedded after window switch";
+                encodingStatus.Text = "Runtime  Embedded  " + opacitySlider.Value + "%";
+                WriteOutput("Application window was recreated or restored and has been re-embedded.");
+                return;
+            }
+
+            if (hostingRecoveryAttempts < 8) return;
+            recoveredStyle = NativeMethods.GetStyle(candidate, NativeMethods.GWL_STYLE);
+            recoveredExStyle = NativeMethods.GetStyle(candidate, NativeMethods.GWL_EXSTYLE);
+            applicationHandle = candidate;
+            originalApplicationStyle = recoveredStyle;
+            originalApplicationExStyle = recoveredExStyle;
+            originalApplicationOwner = recoveredOwner;
+            NativeMethods.PrepareOverlay(candidate, originalApplicationStyle, originalApplicationExStyle, Handle);
+            applicationOverlay = true;
+            hostingRecoveryAttempts = 0;
+            if (applicationViewVisible) ResizeApplication();
+            NativeMethods.SetForegroundWindow(Handle);
+            WriteOutput("Repeated re-embedding failed; switched to compatible overlay mode.");
+            encodingStatus.Text = "Runtime  Overlay  " + opacitySlider.Value + "%";
         }
 
         private void MainFormClosing(object sender, FormClosingEventArgs e)
@@ -1423,7 +1479,7 @@ namespace WorkbenchHost
             else if (applicationEmbedded && NativeMethods.IsWindow(applicationHandle))
             {
                 NativeMethods.ShowWindow(applicationHandle, NativeMethods.SW_HIDE);
-                NativeMethods.RestoreTopLevelWindow(applicationHandle, originalApplicationStyle, originalApplicationOwner);
+                NativeMethods.RestoreTopLevelWindow(applicationHandle, originalApplicationStyle, originalApplicationExStyle, originalApplicationOwner);
             }
         }
 
