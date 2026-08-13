@@ -25,6 +25,9 @@ namespace WorkbenchHost
             internal string DisplayName;
             internal string SavedText;
             internal RichTextBox Editor;
+            internal Panel Surface;
+            internal Label Breadcrumb;
+            internal EditorGutter Gutter;
             internal TabPage Tab;
             internal bool IsTrigger;
             internal bool SuppressChanges;
@@ -350,18 +353,35 @@ namespace WorkbenchHost
             closeButton.Clicked += delegate { Close(); };
             windowButtons.Controls.AddRange(new Control[] { minButton, maxButton, closeButton });
 
+            Panel commandCenter = new Panel();
+            commandCenter.Dock = DockStyle.Fill;
+            commandCenter.Height = 24;
+            commandCenter.Margin = new Padding(60, 5, 60, 5);
+            commandCenter.BackColor = VSCodeColors.Input;
+            commandCenter.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using (Pen pen = new Pen(VSCodeColors.DropdownBorder))
+                using (System.Drawing.Drawing2D.GraphicsPath path = RoundedRectangle(commandCenter.ClientRectangle, 6))
+                    e.Graphics.DrawPath(pen, path);
+                IconPainter.DrawSearch(e.Graphics, new Rectangle(8, 5, 13, 13), VSCodeColors.TextMuted);
+            };
+
             titleText = new Label();
             titleText.Dock = DockStyle.Fill;
-            titleText.Text = Text;
+            titleText.Text = Path.GetFileName(workspaceDirectory);
             titleText.TextAlign = ContentAlignment.MiddleCenter;
             titleText.ForeColor = VSCodeColors.Text;
             titleText.Font = uiFont;
+            titleText.BackColor = Color.Transparent;
+            titleText.Padding = new Padding(24, 0, 8, 0);
             titleText.UseMnemonic = false;
             titleText.MouseDown += delegate(object sender, MouseEventArgs e)
             {
                 if (e.Button == MouseButtons.Left) BeginTitleDrag();
             };
             titleText.MouseDoubleClick += delegate { ToggleMaximize(); };
+            commandCenter.Controls.Add(titleText);
 
             Panel titleLeft = new Panel();
             titleLeft.Dock = DockStyle.Fill;
@@ -380,7 +400,7 @@ namespace WorkbenchHost
             titleLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 138));
             titleLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             titleLayout.Controls.Add(titleLeft, 0, 0);
-            titleLayout.Controls.Add(titleText, 1, 0);
+            titleLayout.Controls.Add(commandCenter, 1, 0);
             titleLayout.Controls.Add(windowButtons, 2, 0);
             titleBar.Controls.Add(titleLayout);
             Controls.Add(titleBar);
@@ -444,11 +464,18 @@ namespace WorkbenchHost
             activity.BackColor = VSCodeColors.ActivityBar;
             activity.Paint += DrawActivityBar;
             activity.MouseMove += ActivityMouseMove;
+            activity.Resize += delegate { activity.Invalidate(); };
             activity.MouseLeave += delegate { activityHoverIndex = -1; activity.Invalidate(); };
             activity.MouseDown += delegate(object sender, MouseEventArgs e)
             {
-                if (e.Y < 48) tree.Focus();
-                else FindInCurrent();
+                int index = ActivityIndexAt(activity, e.Y);
+                if (index == 0) tree.Focus();
+                else if (index == 1) FindInCurrent();
+                else if (index == 2) { contentSplit.Panel2Collapsed = false; statusText.Text = "Source Control"; }
+                else if (index == 3) ShowTriggerCode();
+                else if (index == 4) ImportApplicationProfile();
+                else if (index == 5) statusText.Text = "Accounts";
+                else if (index == 6) statusText.Text = "Manage";
             };
 
             Panel explorer = new Panel();
@@ -465,6 +492,11 @@ namespace WorkbenchHost
             {
                 using (Pen pen = new Pen(VSCodeColors.Separator))
                     e.Graphics.DrawLine(pen, 0, explorerTitle.Height - 1, explorerTitle.Width, explorerTitle.Height - 1);
+                using (SolidBrush dot = new SolidBrush(VSCodeColors.TextMuted))
+                {
+                    int x = explorerTitle.Width - 24;
+                    for (int i = 0; i < 3; i++) e.Graphics.FillEllipse(dot, x + i * 5, 16, 2, 2);
+                }
             };
 
             tree = new TreeView();
@@ -578,30 +610,60 @@ namespace WorkbenchHost
 
         private void DrawActivityBar(object sender, PaintEventArgs e)
         {
-            for (int i = 0; i < 2; i++)
+            Control bar = (Control)sender;
+            for (int i = 0; i < 7; i++)
             {
                 Color color = i == 0 ? VSCodeColors.TextBright : VSCodeColors.ActivityInactive;
                 if (activityHoverIndex == i) color = VSCodeColors.TextBright;
-                Rectangle icon = new Rectangle(12, i * 48 + 12, 24, 24);
+                int y = i < 5 ? i * 48 + 12 : bar.Height - (7 - i) * 48 + 12;
+                Rectangle icon = new Rectangle(12, y, 24, 24);
                 if (i == 0) IconPainter.DrawFolder(e.Graphics, icon, color);
-                else IconPainter.DrawSearch(e.Graphics, icon, color);
+                else if (i == 1) IconPainter.DrawSearch(e.Graphics, icon, color);
+                else if (i == 2) IconPainter.DrawBranch(e.Graphics, icon, color);
+                else if (i == 3) IconPainter.DrawPlay(e.Graphics, icon, color);
+                else if (i == 4) IconPainter.DrawExtensions(e.Graphics, icon, color);
+                else if (i == 5) IconPainter.DrawAccount(e.Graphics, icon, color);
+                else IconPainter.DrawGear(e.Graphics, icon, color);
                 if (i == 0)
                 {
-                    using (SolidBrush b = new SolidBrush(Color.White))
-                        e.Graphics.FillRectangle(b, 0, i * 48 + 11, 2, 26);
+                    using (SolidBrush b = new SolidBrush(VSCodeColors.Accent)) e.Graphics.FillRectangle(b, 0, 8, 2, 32);
                 }
             }
         }
 
         private void ActivityMouseMove(object sender, MouseEventArgs e)
         {
-            int index = e.Y < 48 ? 0 : (e.Y < 96 ? 1 : -1);
+            int index = ActivityIndexAt((Control)sender, e.Y);
             if (index != activityHoverIndex)
             {
                 activityHoverIndex = index;
-                activityTip.SetToolTip((Control)sender, index == 0 ? "Explorer" : index == 1 ? "Search in current file" : String.Empty);
+                string[] names = { "Explorer", "Search", "Source Control", "Run", "Extensions", "Accounts", "Manage" };
+                activityTip.SetToolTip((Control)sender, index >= 0 ? names[index] : String.Empty);
                 ((Control)sender).Invalidate();
             }
+        }
+
+        private static int ActivityIndexAt(Control bar, int y)
+        {
+            if (y >= 0 && y < 5 * 48) return y / 48;
+            if (y >= bar.Height - 96 && y < bar.Height) return 5 + (y - (bar.Height - 96)) / 48;
+            return -1;
+        }
+
+        private static System.Drawing.Drawing2D.GraphicsPath RoundedRectangle(Rectangle bounds, int radius)
+        {
+            System.Drawing.Drawing2D.GraphicsPath path = new System.Drawing.Drawing2D.GraphicsPath();
+            int diameter = radius * 2;
+            Rectangle arc = new Rectangle(bounds.X, bounds.Y, diameter, diameter);
+            path.AddArc(arc, 180, 90);
+            arc.X = bounds.Right - diameter - 1;
+            path.AddArc(arc, 270, 90);
+            arc.Y = bounds.Bottom - diameter - 1;
+            path.AddArc(arc, 0, 90);
+            arc.X = bounds.X;
+            path.AddArc(arc, 90, 90);
+            path.CloseFigure();
+            return path;
         }
 
         private void TreeDrawNode(object sender, DrawTreeNodeEventArgs e)
@@ -633,7 +695,11 @@ namespace WorkbenchHost
                 }
                 IconPainter.DrawFolder(e.Graphics, new Rectangle(iconX + 12, e.Bounds.Y + 5, 15, 15), selected ? VSCodeColors.TextBright : Color.FromArgb(220, 184, 87));
             }
-            else IconPainter.DrawFile(e.Graphics, new Rectangle(iconX + 13, e.Bounds.Y + 5, 13, 15), selected ? VSCodeColors.TextBright : VSCodeColors.TextMuted);
+            else
+            {
+                string extension = target == null ? String.Empty : Path.GetExtension(target.Path);
+                IconPainter.DrawFile(e.Graphics, new Rectangle(iconX + 13, e.Bounds.Y + 5, 13, 15), selected ? VSCodeColors.TextBright : IconPainter.FileColor(extension));
+            }
 
             Color nodeColor = selected ? VSCodeColors.TextBright : e.Node.ForeColor;
             if (nodeColor == Color.Empty || nodeColor == SystemColors.WindowText || nodeColor == Color.Black) nodeColor = textColor;
@@ -925,12 +991,13 @@ namespace WorkbenchHost
             HighlightEditor(document.Editor, Path.GetExtension(fullPath).ToLowerInvariant());
             document.SuppressChanges = false;
             document.Editor.Modified = false;
-            document.Editor.SelectionChanged += delegate { UpdateCursorStatus(document.Editor); };
+            document.Editor.SelectionChanged += delegate { UpdateCursorStatus(document.Editor); if (document.Gutter != null) document.Gutter.Invalidate(); };
             document.Editor.TextChanged += delegate { DocumentTextChanged(document); };
             document.Tab = new TabPage(displayName + "  x");
             document.Tab.Tag = document;
             document.Tab.BackColor = editorColor;
-            document.Tab.Controls.Add(document.Editor);
+            BuildEditorSurface(document);
+            document.Tab.Controls.Add(document.Surface);
             tabs.TabPages.Add(document.Tab);
             openDocuments[fullPath] = document;
             if (document.IsTrigger) triggerDocument = document;
@@ -976,6 +1043,43 @@ namespace WorkbenchHost
             editor.DetectUrls = false;
             editor.ScrollBars = RichTextBoxScrollBars.Both;
             return editor;
+        }
+
+        private void BuildEditorSurface(EditorDocument document)
+        {
+            document.Surface = new Panel();
+            document.Surface.Dock = DockStyle.Fill;
+            document.Surface.BackColor = editorColor;
+
+            document.Breadcrumb = new Label();
+            document.Breadcrumb.Dock = DockStyle.Top;
+            document.Breadcrumb.Height = 25;
+            document.Breadcrumb.Padding = new Padding(12, 5, 0, 0);
+            document.Breadcrumb.BackColor = VSCodeColors.Editor;
+            document.Breadcrumb.ForeColor = VSCodeColors.TextMuted;
+            document.Breadcrumb.Font = new Font("Segoe UI", 8.5F);
+            document.Breadcrumb.Text = BreadcrumbText(document);
+            document.Breadcrumb.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                using (Pen pen = new Pen(VSCodeColors.Border)) e.Graphics.DrawLine(pen, 0, document.Breadcrumb.Height - 1, document.Breadcrumb.Width, document.Breadcrumb.Height - 1);
+            };
+
+            Panel editorBody = new Panel();
+            editorBody.Dock = DockStyle.Fill;
+            editorBody.BackColor = editorColor;
+            document.Gutter = new EditorGutter();
+            document.Gutter.Editor = document.Editor;
+            editorBody.Controls.Add(document.Editor);
+            editorBody.Controls.Add(document.Gutter);
+            document.Surface.Controls.Add(editorBody);
+            document.Surface.Controls.Add(document.Breadcrumb);
+        }
+
+        private string BreadcrumbText(EditorDocument document)
+        {
+            if (document == null || String.IsNullOrEmpty(document.Path)) return document == null ? String.Empty : document.DisplayName;
+            string relative = RelativePath(document.Path).Replace("\\", "  >  ");
+            return relative;
         }
 
         private void EnsureTriggerFile()
@@ -1320,11 +1424,12 @@ namespace WorkbenchHost
             document.IsUntitled = true;
             document.Editor = NewEditor(false);
             document.Editor.TextChanged += delegate { UpdateDocumentTitle(document); };
-            document.Editor.SelectionChanged += delegate { UpdateCursorStatus(document.Editor); };
+            document.Editor.SelectionChanged += delegate { UpdateCursorStatus(document.Editor); if (document.Gutter != null) document.Gutter.Invalidate(); };
             document.Tab = new TabPage(document.DisplayName + "  x");
             document.Tab.Tag = document;
             document.Tab.BackColor = editorColor;
-            document.Tab.Controls.Add(document.Editor);
+            BuildEditorSurface(document);
+            document.Tab.Controls.Add(document.Surface);
             tabs.TabPages.Add(document.Tab);
             tabs.SelectedTab = document.Tab;
             lastCodeDocument = document;
@@ -1569,6 +1674,7 @@ namespace WorkbenchHost
                 document.SavedText = document.Editor.Text;
                 document.Editor.Modified = false;
                 openDocuments[newPath] = document;
+                if (document.Breadcrumb != null) document.Breadcrumb.Text = BreadcrumbText(document);
                 if (String.Equals(newPath, triggerPath, StringComparison.OrdinalIgnoreCase))
                 {
                     document.IsTrigger = true;

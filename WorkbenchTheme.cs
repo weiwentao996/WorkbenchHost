@@ -10,29 +10,79 @@ namespace WorkbenchHost
     // ------------------------------------------------------------------
     internal static class VSCodeColors
     {
-        internal static readonly Color TitleBar = Color.FromArgb(60, 60, 60);      // #3C3C3C menu bar / title bar
-        internal static readonly Color TitleBarHover = Color.FromArgb(80, 80, 80); // #505050
+        internal static readonly Color TitleBar = Color.FromArgb(24, 24, 27);      // modern VS Code title bar
+        internal static readonly Color TitleBarHover = Color.FromArgb(45, 45, 48);
         internal static readonly Color CloseHover = Color.FromArgb(232, 17, 35);   // #E81123
-        internal static readonly Color Window = Color.FromArgb(30, 30, 30);        // #1E1E1E editor / window
+        internal static readonly Color Window = Color.FromArgb(24, 24, 27);
         internal static readonly Color Editor = Color.FromArgb(30, 30, 30);       // #1E1E1E editor area
-        internal static readonly Color Sidebar = Color.FromArgb(37, 37, 38);       // #252526 side bar
-        internal static readonly Color ActivityBar = Color.FromArgb(51, 51, 51);   // #333333 activity bar
-        internal static readonly Color Toolbar = Color.FromArgb(45, 45, 45);       // #2D2D2D editor group header
-        internal static readonly Color TabInactive = Color.FromArgb(45, 45, 45);   // #2D2D2D
-        internal static readonly Color StatusBar = Color.FromArgb(0, 122, 204);    // #007ACC
+        internal static readonly Color Sidebar = Color.FromArgb(24, 24, 27);
+        internal static readonly Color ActivityBar = Color.FromArgb(24, 24, 27);
+        internal static readonly Color Toolbar = Color.FromArgb(24, 24, 27);
+        internal static readonly Color TabInactive = Color.FromArgb(24, 24, 27);
+        internal static readonly Color StatusBar = Color.FromArgb(24, 24, 27);
         internal static readonly Color Accent = Color.FromArgb(0, 122, 204);       // #007ACC
         internal static readonly Color AccentDark = Color.FromArgb(14, 99, 156);   // #0E639C buttons
-        internal static readonly Color Hover = Color.FromArgb(42, 45, 46);         // #2A2D2E list hover
-        internal static readonly Color Selected = Color.FromArgb(9, 71, 113);      // #094771 list selection
-        internal static readonly Color Dropdown = Color.FromArgb(37, 37, 38);      // #252526 menu dropdown
+        internal static readonly Color Hover = Color.FromArgb(43, 45, 48);
+        internal static readonly Color Selected = Color.FromArgb(55, 58, 65);
+        internal static readonly Color Dropdown = Color.FromArgb(31, 31, 35);
         internal static readonly Color DropdownBorder = Color.FromArgb(69, 69, 69);// #454545
         internal static readonly Color Separator = Color.FromArgb(63, 63, 70);     // #3F3F46
-        internal static readonly Color Input = Color.FromArgb(60, 60, 60);         // #3C3C3C inputs
-        internal static readonly Color Border = Color.FromArgb(45, 45, 45);        // #2D2D2D hairlines
+        internal static readonly Color Input = Color.FromArgb(35, 35, 40);
+        internal static readonly Color Border = Color.FromArgb(43, 43, 48);
         internal static readonly Color Text = Color.FromArgb(204, 204, 204);       // #CCCCCC
         internal static readonly Color TextBright = Color.FromArgb(255, 255, 255); // #FFFFFF
         internal static readonly Color TextMuted = Color.FromArgb(150, 150, 150);  // #969696
         internal static readonly Color ActivityInactive = Color.FromArgb(133, 133, 133); // #858585
+    }
+
+    internal sealed class EditorGutter : Control
+    {
+        private RichTextBox editor;
+
+        internal EditorGutter()
+        {
+            Dock = DockStyle.Left;
+            Width = 52;
+            BackColor = VSCodeColors.Editor;
+            ForeColor = Color.FromArgb(133, 133, 133);
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        }
+
+        internal RichTextBox Editor
+        {
+            get { return editor; }
+            set
+            {
+                editor = value;
+                if (editor == null) return;
+                editor.VScroll += delegate { Invalidate(); };
+                editor.TextChanged += delegate { Invalidate(); };
+                editor.Resize += delegate { Invalidate(); };
+                editor.SelectionChanged += delegate { Invalidate(); };
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor);
+            if (editor == null || editor.Lines.Length == 0) return;
+            int firstChar = editor.GetCharIndexFromPosition(new Point(1, 1));
+            int firstLine = Math.Max(0, editor.GetLineFromCharIndex(firstChar));
+            int currentLine = Math.Max(0, editor.GetLineFromCharIndex(editor.SelectionStart));
+            int bottom = editor.ClientSize.Height;
+            for (int line = firstLine; line < editor.Lines.Length; line++)
+            {
+                int lineStart = editor.GetFirstCharIndexFromLine(line);
+                if (lineStart < 0) break;
+                Point position = editor.GetPositionFromCharIndex(lineStart);
+                if (position.Y > bottom) break;
+                Color color = line == currentLine ? VSCodeColors.Text : ForeColor;
+                TextRenderer.DrawText(e.Graphics, (line + 1).ToString(), editor.Font,
+                    new Rectangle(0, position.Y, Width - 10, Math.Max(18, editor.Font.Height + 3)),
+                    color, TextFormatFlags.Right | TextFormatFlags.Top | TextFormatFlags.NoPadding);
+            }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -256,6 +306,71 @@ namespace WorkbenchHost
             }
         }
 
+        internal static void DrawBranch(Graphics g, Rectangle r, Color color)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (Pen pen = new Pen(color, 1.8F))
+            {
+                g.DrawLine(pen, r.Left + 6, r.Top + 5, r.Left + 6, r.Bottom - 5);
+                g.DrawLine(pen, r.Left + 6, r.Top + 11, r.Right - 6, r.Top + 11);
+                g.DrawLine(pen, r.Right - 6, r.Top + 11, r.Right - 6, r.Bottom - 5);
+                g.DrawEllipse(pen, r.Left + 3, r.Top + 1, 6, 6);
+                g.DrawEllipse(pen, r.Left + 3, r.Bottom - 8, 6, 6);
+                g.DrawEllipse(pen, r.Right - 9, r.Bottom - 8, 6, 6);
+            }
+        }
+
+        internal static void DrawPlay(Graphics g, Rectangle r, Color color)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (Pen pen = new Pen(color, 1.6F)) g.DrawEllipse(pen, r.Left + 1, r.Top + 1, r.Width - 5, r.Height - 5);
+            using (SolidBrush brush = new SolidBrush(color))
+                g.FillPolygon(brush, new Point[] { new Point(r.Left + 9, r.Top + 6), new Point(r.Right - 5, r.Top + r.Height / 2), new Point(r.Left + 9, r.Bottom - 7) });
+        }
+
+        internal static void DrawExtensions(Graphics g, Rectangle r, Color color)
+        {
+            using (Pen pen = new Pen(color, 1.5F))
+            {
+                int s = 8;
+                g.DrawRectangle(pen, r.Left + 2, r.Top + 2, s, s);
+                g.DrawRectangle(pen, r.Left + 13, r.Top + 2, s, s);
+                g.DrawRectangle(pen, r.Left + 2, r.Top + 13, s, s);
+                g.DrawRectangle(pen, r.Left + 13, r.Top + 13, s, s);
+            }
+        }
+
+        internal static void DrawAccount(Graphics g, Rectangle r, Color color)
+        {
+            using (Pen pen = new Pen(color, 1.6F))
+            {
+                g.DrawEllipse(pen, r.Left + 7, r.Top + 2, 10, 10);
+                g.DrawArc(pen, r.Left + 3, r.Top + 12, 18, 12, 190, 160);
+            }
+        }
+
+        internal static void DrawGear(Graphics g, Rectangle r, Color color)
+        {
+            using (Pen pen = new Pen(color, 1.8F))
+            {
+                g.DrawEllipse(pen, r.Left + 4, r.Top + 4, 16, 16);
+                g.DrawEllipse(pen, r.Left + 9, r.Top + 9, 6, 6);
+                for (int i = 0; i < 8; i++)
+                {
+                    double a = i * Math.PI / 4;
+                    eLine(g, pen, r, a, 9, 12);
+                }
+            }
+        }
+
+        private static void eLine(Graphics g, Pen pen, Rectangle r, double angle, double inner, double outer)
+        {
+            float cx = r.Left + r.Width / 2F;
+            float cy = r.Top + r.Height / 2F;
+            g.DrawLine(pen, cx + (float)Math.Cos(angle) * (float)inner, cy + (float)Math.Sin(angle) * (float)inner,
+                cx + (float)Math.Cos(angle) * (float)outer, cy + (float)Math.Sin(angle) * (float)outer);
+        }
+
         internal static void DrawClose(Graphics g, Rectangle r, Color color)
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -284,6 +399,23 @@ namespace WorkbenchHost
                 g.DrawLines(pen, outline);
                 g.DrawLine(pen, r.Right - fold, r.Top, r.Right - fold, r.Top + fold);
                 g.DrawLine(pen, r.Right - fold, r.Top + fold, r.Right, r.Top + fold);
+            }
+        }
+
+        internal static Color FileColor(string extension)
+        {
+            switch ((extension ?? String.Empty).ToLowerInvariant())
+            {
+                case ".cs": return Color.FromArgb(86, 156, 214);
+                case ".go": return Color.FromArgb(78, 201, 176);
+                case ".json": return Color.FromArgb(220, 220, 170);
+                case ".md": return Color.FromArgb(117, 190, 255);
+                case ".png":
+                case ".jpg":
+                case ".ico": return Color.FromArgb(197, 134, 192);
+                case ".cmd":
+                case ".ps1": return Color.FromArgb(106, 153, 85);
+                default: return VSCodeColors.TextMuted;
             }
         }
     }
