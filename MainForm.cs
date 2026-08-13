@@ -513,7 +513,7 @@ namespace WorkbenchHost
             tree.ShowPlusMinus = false;
             tree.ShowRootLines = false;
             tree.FullRowSelect = true;
-            tree.Indent = 16;
+            tree.Indent = 12;
             tree.ItemHeight = 24;
             tree.DrawMode = TreeViewDrawMode.OwnerDrawText;
             tree.DrawNode += TreeDrawNode;
@@ -683,6 +683,7 @@ namespace WorkbenchHost
             NodeTarget target = e.Node.Tag as NodeTarget;
             bool directory = target != null && target.IsDirectory;
             int iconX = Math.Max(4, e.Bounds.X);
+            int textX;
             if (directory)
             {
                 Color chevronColor = selected ? VSCodeColors.TextBright : VSCodeColors.TextMuted;
@@ -699,17 +700,19 @@ namespace WorkbenchHost
                         e.Graphics.DrawLine(pen, iconX + 6, e.Bounds.Y + 11, iconX + 2, e.Bounds.Y + 15);
                     }
                 }
+                textX = iconX + 12;
             }
             else
             {
-                IconPainter.DrawSetiFile(e.Graphics, new Rectangle(iconX + 8, e.Bounds.Y + 2, 21, 20),
+                IconPainter.DrawSetiFile(e.Graphics, new Rectangle(iconX + 1, e.Bounds.Y + 2, 21, 20),
                     target == null ? e.Node.Text : target.Path, selected);
+                textX = iconX + 23;
             }
 
             Color nodeColor = selected ? VSCodeColors.TextBright : e.Node.ForeColor;
             if (nodeColor == Color.Empty || nodeColor == SystemColors.WindowText || nodeColor == Color.Black) nodeColor = textColor;
             TextRenderer.DrawText(e.Graphics, e.Node.Text, e.Node.NodeFont ?? tree.Font,
-                new Rectangle(iconX + 31, e.Bounds.Y, Math.Max(0, tree.ClientSize.Width - iconX - 33), e.Bounds.Height),
+                new Rectangle(textX, e.Bounds.Y, Math.Max(0, tree.ClientSize.Width - textX - 2), e.Bounds.Height),
                 nodeColor, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
         }
 
