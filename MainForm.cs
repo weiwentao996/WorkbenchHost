@@ -516,6 +516,7 @@ namespace WorkbenchHost
             tree.DrawNode += TreeDrawNode;
             tree.HandleCreated += delegate
             {
+                NativeMethods.ApplyDarkControlTheme(tree.Handle);
                 NativeMethods.SendMessage(tree.Handle, 0x112C, new IntPtr(0x8000), new IntPtr(0x8000));
             };
             explorer.Controls.Add(tree);
@@ -594,6 +595,7 @@ namespace WorkbenchHost
             output.BackColor = windowColor;
             output.ForeColor = textColor;
             output.Font = codeFont;
+            output.HandleCreated += delegate { NativeMethods.ApplyDarkControlTheme(output.Handle); };
 
             contentSplit.Panel1.Controls.Add(tabs);
             contentSplit.Panel2.Controls.Add(output);
@@ -617,13 +619,14 @@ namespace WorkbenchHost
                 if (activityHoverIndex == i) color = VSCodeColors.TextBright;
                 int y = i < 5 ? i * 48 + 12 : bar.Height - (7 - i) * 48 + 12;
                 Rectangle icon = new Rectangle(12, y, 24, 24);
-                if (i == 0) IconPainter.DrawFolder(e.Graphics, icon, color);
-                else if (i == 1) IconPainter.DrawSearch(e.Graphics, icon, color);
-                else if (i == 2) IconPainter.DrawBranch(e.Graphics, icon, color);
-                else if (i == 3) IconPainter.DrawPlay(e.Graphics, icon, color);
-                else if (i == 4) IconPainter.DrawExtensions(e.Graphics, icon, color);
-                else if (i == 5) IconPainter.DrawAccount(e.Graphics, icon, color);
-                else IconPainter.DrawGear(e.Graphics, icon, color);
+                IconPainter.Codicon codicon = IconPainter.Codicon.Files;
+                if (i == 1) codicon = IconPainter.Codicon.Search;
+                else if (i == 2) codicon = IconPainter.Codicon.SourceControl;
+                else if (i == 3) codicon = IconPainter.Codicon.Run;
+                else if (i == 4) codicon = IconPainter.Codicon.Extensions;
+                else if (i == 5) codicon = IconPainter.Codicon.Account;
+                else if (i == 6) codicon = IconPainter.Codicon.Settings;
+                IconPainter.DrawCodicon(e.Graphics, icon, codicon, color, 24F);
                 if (i == 0)
                 {
                     using (SolidBrush b = new SolidBrush(VSCodeColors.Accent)) e.Graphics.FillRectangle(b, 0, 8, 2, 32);
@@ -693,12 +696,15 @@ namespace WorkbenchHost
                         e.Graphics.DrawLine(pen, iconX + 6, e.Bounds.Y + 11, iconX + 2, e.Bounds.Y + 15);
                     }
                 }
-                IconPainter.DrawFolder(e.Graphics, new Rectangle(iconX + 12, e.Bounds.Y + 5, 15, 15), selected ? VSCodeColors.TextBright : Color.FromArgb(220, 184, 87));
+                IconPainter.DrawCodicon(e.Graphics, new Rectangle(iconX + 11, e.Bounds.Y + 3, 18, 18),
+                    e.Node.IsExpanded ? IconPainter.Codicon.FolderOpened : IconPainter.Codicon.Folder,
+                    selected ? VSCodeColors.TextBright : Color.FromArgb(220, 184, 87), 16F);
             }
             else
             {
                 string extension = target == null ? String.Empty : Path.GetExtension(target.Path);
-                IconPainter.DrawFile(e.Graphics, new Rectangle(iconX + 13, e.Bounds.Y + 5, 13, 15), selected ? VSCodeColors.TextBright : IconPainter.FileColor(extension));
+                IconPainter.DrawCodicon(e.Graphics, new Rectangle(iconX + 11, e.Bounds.Y + 3, 18, 18),
+                    IconPainter.Codicon.File, selected ? VSCodeColors.TextBright : IconPainter.FileColor(extension), 16F);
             }
 
             Color nodeColor = selected ? VSCodeColors.TextBright : e.Node.ForeColor;
@@ -1042,6 +1048,7 @@ namespace WorkbenchHost
             editor.AcceptsTab = true;
             editor.DetectUrls = false;
             editor.ScrollBars = RichTextBoxScrollBars.Both;
+            editor.HandleCreated += delegate { NativeMethods.ApplyDarkControlTheme(editor.Handle); };
             return editor;
         }
 

@@ -117,6 +117,9 @@ namespace WorkbenchHost
         [DllImport("user32.dll")]
         internal static extern bool PostMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
 
+        [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+        private static extern int SetWindowTheme(IntPtr hWnd, string subAppName, string subIdList);
+
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool SetLayeredWindowAttributes(IntPtr hWnd, uint colorKey, byte alpha, uint flags);
 
@@ -132,6 +135,17 @@ namespace WorkbenchHost
         private static bool magnificationInitialized;
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        internal static void ApplyDarkControlTheme(IntPtr handle)
+        {
+            if (handle == IntPtr.Zero) return;
+            try
+            {
+                SetWindowTheme(handle, "DarkMode_Explorer", null);
+                SendMessage(handle, 0x031A, IntPtr.Zero, IntPtr.Zero); // WM_THEMECHANGED
+            }
+            catch { }
+        }
 
         internal static IntPtr FindTopLevelWindow(uint processId, string expectedClass)
         {

@@ -16,6 +16,7 @@ namespace WorkbenchHost
             string root = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
             try
             {
+                IconPainter.InitializeCodicons(root);
                 List<WorkbenchProfile> profiles = LoadProfiles(args, root);
                 Application.Run(new MainForm(root, profiles));
             }

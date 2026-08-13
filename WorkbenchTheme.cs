@@ -1,6 +1,8 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Text;
+using System.IO;
 using System.Windows.Forms;
 
 namespace WorkbenchHost
@@ -272,6 +274,49 @@ namespace WorkbenchHost
     // ------------------------------------------------------------------
     internal static class IconPainter
     {
+        private static readonly PrivateFontCollection CodiconFonts = new PrivateFontCollection();
+        private static FontFamily codiconFamily;
+
+        internal enum Codicon
+        {
+            SourceControl = 0xea68,
+            Search = 0xea6d,
+            Extensions = 0xeae6,
+            Files = 0xeaf0,
+            File = 0xea7b,
+            Folder = 0xea83,
+            FolderOpened = 0xea84,
+            Run = 0xeb2c,
+            Settings = 0xeb51,
+            Account = 0xeb99
+        }
+
+        internal static void InitializeCodicons(string applicationRoot)
+        {
+            string path = Path.Combine(applicationRoot, "assets", "codicon.ttf");
+            if (!File.Exists(path)) return;
+            try
+            {
+                CodiconFonts.AddFontFile(path);
+                if (CodiconFonts.Families.Length > 0) codiconFamily = CodiconFonts.Families[0];
+            }
+            catch { codiconFamily = null; }
+        }
+
+        internal static void DrawCodicon(Graphics g, Rectangle bounds, Codicon icon, Color color, float size)
+        {
+            if (codiconFamily == null) return;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            using (Font font = new Font(codiconFamily, size, FontStyle.Regular, GraphicsUnit.Pixel))
+            using (SolidBrush brush = new SolidBrush(color))
+            using (StringFormat format = new StringFormat(StringFormat.GenericTypographic))
+            {
+                format.Alignment = StringAlignment.Center;
+                format.LineAlignment = StringAlignment.Center;
+                g.DrawString(Convert.ToChar((int)icon).ToString(), font, brush, bounds, format);
+            }
+        }
+
         internal static void DrawFolder(Graphics g, Rectangle r, Color color)
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
