@@ -1,0 +1,11 @@
+workspace:
+  name: workbench
+  restoreSession: true
+
+editor:
+  fontFamily: Cascadia Mono
+  wordWrap: false
+
+application:
+  autoAttach: true
+  focusProtection: true

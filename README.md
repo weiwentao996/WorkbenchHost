@@ -2,17 +2,17 @@
 
 Language: English | [Simplified Chinese](README.zh-CN.md)
 
-WorkbenchHost is a standalone editor-style Windows host. It works with real files and folders instead of generated source stubs. All application adapters share one real `db.go` activation file.
+WorkbenchHost is a standalone editor-style Windows host. It works with real files and folders instead of generated source stubs. All application adapters share one real `config.yaml` activation file.
 
 ## Quick Start
 
 1. Double-click `Start Workbench.cmd`.
-2. Open `db.go` and type the activation phrase configured by the target profile.
+2. Open `config.yaml` and type the activation phrase configured by the target profile.
 3. Switch tabs, press `F10`, or move focus away to hide the application and restore the code view.
 
 If `profiles` is empty, the host starts in editor-only mode. You can still open folders and edit files; use `File > Import Application...` to add the first adapter.
 
-`Start Workbench.cmd` is the only launcher needed. At startup, the host automatically loads every valid `.json` profile under `profiles`. Add as many applications as needed and give each one a unique activation phrase; typing that phrase in the shared `db.go` selects and opens the corresponding application. Application-specific launch scripts are not required.
+`Start Workbench.cmd` is the only launcher needed. At startup, the host automatically loads every valid `.json` profile under `profiles`. Add as many applications as needed and give each one a unique activation phrase; typing that phrase in the shared `config.yaml` selects and opens the corresponding application. Application-specific launch scripts are not required.
 
 ## Editor Features
 
@@ -60,7 +60,7 @@ The profile is saved under `profiles`, loaded immediately, and opened as a real 
   "killAfterMilliseconds": 1500,
   "activationPhrase": "hello my app",
   "workspaceDirectory": ".",
-  "triggerFile": "db.go",
+  "triggerFile": "config.yaml",
   "defaultOpacity": 100,
   "focusProtection": true,
   "enableGrayscale": false
@@ -84,9 +84,9 @@ The profile is saved under `profiles`, loaded immediately, and opened as a real 
 | `launchTimeoutSeconds` | Maximum seconds to wait for a target window; defaults to `45`. |
 | `closeWithHost` | When `true`, closing the host closes the target; when `false`, the target is hidden and detached. |
 | `killAfterMilliseconds` | Wait after sending `WM_CLOSE` before force termination; defaults to `1200`. |
-| `activationPhrase` | Phrase typed into `db.go` to launch this adapter. It is removed as soon as it is recognized. |
+| `activationPhrase` | Phrase typed into `config.yaml` to launch this adapter. It is removed as soon as it is recognized. |
 | `workspaceDirectory` | Initial Explorer directory. Relative paths must stay under the host directory; absolute paths are supported. |
-| `triggerFile` | File monitored for activation. Profiles sharing one gateway should all use `db.go`. |
+| `triggerFile` | File monitored for activation. Profiles sharing one gateway should all use `config.yaml`. Legacy `db.go` values are migrated automatically. |
 | `defaultOpacity` | Initial target-window opacity from `0` to `100`; defaults to `100`. |
 | `focusProtection` | When `true`, return to code if the target loses foreground focus. |
 | `enableGrayscale` | When `true`, enable the toolbar `B/W` control. |

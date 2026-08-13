@@ -54,7 +54,7 @@ namespace WorkbenchHost
             data["killAfterMilliseconds"] = 1500;
             data["activationPhrase"] = settings.ActivationPhrase.Trim();
             data["workspaceDirectory"] = ".";
-            data["triggerFile"] = "db.go";
+            data["triggerFile"] = "config.yaml";
             data["defaultOpacity"] = Math.Max(0, Math.Min(100, settings.DefaultOpacity));
             data["focusProtection"] = settings.FocusProtection;
             data["enableGrayscale"] = settings.EnableGrayscale;

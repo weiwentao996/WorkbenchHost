@@ -109,7 +109,7 @@ namespace WorkbenchHost
             sessionState = WorkspaceState.Load();
             if (!String.IsNullOrWhiteSpace(sessionState.WorkspaceDirectory) && Directory.Exists(sessionState.WorkspaceDirectory))
                 workspaceDirectory = Path.GetFullPath(sessionState.WorkspaceDirectory);
-            triggerPath = profile == null ? Path.Combine(root, "db.go") : profile.ResolveTriggerFile();
+            triggerPath = profile == null ? Path.Combine(root, "config.yaml") : profile.ResolveTriggerFile();
             EnsureTriggerFile();
 
             Font candidate = new Font("Cascadia Mono", 10F);
@@ -281,7 +281,7 @@ namespace WorkbenchHost
             applicationDisplay.DropDownItems.Add(opacityHost);
             view.DropDownItems.Add(applicationDisplay);
 
-            runButton = new ToolStripMenuItem("Open db.go");
+            runButton = new ToolStripMenuItem("Open config.yaml");
             runButton.Enabled = profile != null;
             runButton.Click += delegate { ShowTriggerCode(); };
             ToolStripMenuItem returnCode = new ToolStripMenuItem("Return to Code    F10");
@@ -1027,12 +1027,16 @@ namespace WorkbenchHost
                     if (String.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
                     OpenCodeFile(path, Path.GetFileName(path), String.Equals(Path.GetFullPath(path), triggerPath, StringComparison.OrdinalIgnoreCase));
                 }
-                if (tabs.TabCount == 0) OpenCodeFile(triggerPath, Path.GetFileName(triggerPath), true);
+                if (!openDocuments.ContainsKey(Path.GetFullPath(triggerPath)))
+                    OpenCodeFile(triggerPath, Path.GetFileName(triggerPath), true);
 
                 if (!String.IsNullOrWhiteSpace(sessionState.ActiveFile))
                 {
                     EditorDocument active;
-                    if (openDocuments.TryGetValue(Path.GetFullPath(sessionState.ActiveFile), out active)) tabs.SelectedTab = active.Tab;
+                    string activePath = Path.GetFullPath(sessionState.ActiveFile);
+                    bool legacyGateway = String.Equals(Path.GetFileName(activePath), "db.go", StringComparison.OrdinalIgnoreCase) &&
+                        String.Equals(Path.GetDirectoryName(activePath), Path.GetDirectoryName(triggerPath), StringComparison.OrdinalIgnoreCase);
+                    if (!legacyGateway && openDocuments.TryGetValue(activePath, out active)) tabs.SelectedTab = active.Tab;
                 }
             }
             finally { restoringSession = false; }
@@ -1099,7 +1103,7 @@ namespace WorkbenchHost
             if (!String.IsNullOrEmpty(directory) && !Directory.Exists(directory)) Directory.CreateDirectory(directory);
             if (!File.Exists(triggerPath))
             {
-                string source = "package workspace\r\n\r\n// Application command gateway.\r\n// Type the configured command here to run the selected adapter.\r\n\r\nfunc Open() error {\r\n\treturn nil\r\n}\r\n";
+                string source = "workspace:\r\n  name: workbench\r\n  restoreSession: true\r\n\r\neditor:\r\n  fontFamily: Cascadia Mono\r\n  wordWrap: false\r\n\r\napplication:\r\n  autoAttach: true\r\n  focusProtection: true\r\n";
                 File.WriteAllText(triggerPath, source, new UTF8Encoding(false));
             }
         }
@@ -1921,6 +1925,14 @@ namespace WorkbenchHost
                     ApplyColor(editor, "\"(?:\\\\.|[^\"\\\\])*\"(?=\\s*:)", Color.FromArgb(86, 156, 214));
                     ApplyColor(editor, "\"(?:\\\\.|[^\"\\\\])*\"", Color.FromArgb(206, 145, 120));
                     ApplyColor(editor, "\\b(true|false|null)\\b", Color.FromArgb(197, 134, 192));
+                }
+                else if (extension == ".yaml" || extension == ".yml")
+                {
+                    ApplyColor(editor, "(?m)^\\s*[A-Za-z_][A-Za-z0-9_.-]*(?=\\s*:)", Color.FromArgb(86, 156, 214));
+                    ApplyColor(editor, "(?m)#.*$", Color.FromArgb(106, 153, 85));
+                    ApplyColor(editor, "\"(?:\\\\.|[^\"\\\\])*\"|'(?:''|[^'])*'", Color.FromArgb(206, 145, 120));
+                    ApplyColor(editor, "\\b(true|false|null|yes|no|on|off)\\b", Color.FromArgb(197, 134, 192));
+                    ApplyColor(editor, "(?<![A-Za-z0-9_.-])-?\\b\\d+(?:\\.\\d+)?\\b", Color.FromArgb(181, 206, 168));
                 }
                 else
                 {
