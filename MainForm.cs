@@ -848,7 +848,7 @@ namespace WorkbenchHost
         private void BuildEvents()
         {
             HandleCreated += delegate { NativeMethods.ApplyDarkWindowBorder(Handle, VSCodeColors.TitleBar); };
-            Move += delegate { ResizeApplication(); };
+            Move += delegate { if (!resizing) ResizeApplication(); };
             Resize += delegate
             {
                 if (WindowState == FormWindowState.Maximized) MaximizedBounds = Screen.FromControl(this).WorkingArea;
@@ -979,6 +979,7 @@ namespace WorkbenchHost
             resizeEdges = (int)((Control)sender).Tag;
             resizeStartCursor = Cursor.Position;
             resizeStartBounds = Bounds;
+            SetResizeRedraw(false);
             ((Control)sender).Capture = true;
         }
 
@@ -1006,8 +1007,18 @@ namespace WorkbenchHost
             if (e.Button != MouseButtons.Left) return;
             resizing = false;
             ((Control)sender).Capture = false;
+            SetResizeRedraw(true);
             ResizeApplication();
+            Invalidate(true);
             SaveSessionState();
+        }
+
+        private void SetResizeRedraw(bool enabled)
+        {
+            NativeMethods.SetRedraw(contentSplit == null ? IntPtr.Zero : contentSplit.Handle, enabled);
+            NativeMethods.SetRedraw(tabs == null ? IntPtr.Zero : tabs.Handle, enabled);
+            NativeMethods.SetRedraw(tree == null ? IntPtr.Zero : tree.Handle, enabled);
+            NativeMethods.SetRedraw(applicationHost == null ? IntPtr.Zero : applicationHost.Handle, enabled);
         }
 
         private int ResizeEdgesAt(Point cursor)
@@ -1416,7 +1427,7 @@ namespace WorkbenchHost
                 applicationHost.Dock = DockStyle.Fill;
                 applicationHost.Visible = false;
                 applicationHost.CodeFont = codeFont;
-                applicationHost.Resize += delegate { ResizeApplication(); };
+                applicationHost.Resize += delegate { if (!resizing) ResizeApplication(); };
             }
             if (applicationHost.Parent != document.Tab) document.Tab.Controls.Add(applicationHost);
             applicationHost.SourceEditor = document.Editor;
