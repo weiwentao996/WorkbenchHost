@@ -479,18 +479,58 @@ namespace WorkbenchHost
         {
             status = new StatusStrip();
             status.Dock = DockStyle.Bottom;
+            status.AutoSize = false;
+            status.Height = 22;
             status.BackColor = VSCodeColors.StatusBar;
-            status.ForeColor = Color.White;
+            status.ForeColor = VSCodeColors.Text;
             status.SizingGrip = false;
-            status.Font = new Font("Segoe UI", 8.25F);
+            status.Padding = new Padding(4, 0, 4, 0);
+            status.GripMargin = new Padding(0);
+            status.Font = new Font("Segoe UI", 9F);
+            status.Renderer = new VSCodeToolStripRenderer(VSCodeColors.StatusBar);
             ToolStripStatusLabel branch = new ToolStripStatusLabel("main");
-            ToolStripStatusLabel diagnostics = new ToolStripStatusLabel("0 errors  0 warnings");
+            branch.Padding = new Padding(20, 0, 8, 0);
+            branch.Margin = new Padding(0);
+            branch.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                IconPainter.DrawBranch(e.Graphics, new Rectangle(3, 3, 15, 15), VSCodeColors.Text);
+            };
+            ToolStripStatusLabel errors = new ToolStripStatusLabel("0");
+            errors.Padding = new Padding(19, 0, 6, 0);
+            errors.Margin = new Padding(0);
+            errors.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                Rectangle icon = new Rectangle(4, 5, 12, 12);
+                using (Pen pen = new Pen(VSCodeColors.Text, 1.25F))
+                {
+                    e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                    e.Graphics.DrawEllipse(pen, icon);
+                    e.Graphics.DrawLine(pen, icon.Left + 3, icon.Top + 3, icon.Right - 3, icon.Bottom - 3);
+                    e.Graphics.DrawLine(pen, icon.Right - 3, icon.Top + 3, icon.Left + 3, icon.Bottom - 3);
+                }
+            };
+            ToolStripStatusLabel warnings = new ToolStripStatusLabel("0");
+            warnings.Padding = new Padding(19, 0, 8, 0);
+            warnings.Margin = new Padding(0);
+            warnings.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                Point[] triangle = { new Point(10, 4), new Point(16, 16), new Point(4, 16) };
+                using (Pen pen = new Pen(VSCodeColors.Text, 1.25F)) e.Graphics.DrawPolygon(pen, triangle);
+                using (SolidBrush brush = new SolidBrush(VSCodeColors.Text))
+                {
+                    e.Graphics.FillRectangle(brush, 9, 8, 2, 4);
+                    e.Graphics.FillRectangle(brush, 9, 14, 2, 2);
+                }
+            };
             statusText = new ToolStripStatusLabel("Ready");
             statusText.Spring = true;
             statusText.TextAlign = ContentAlignment.MiddleLeft;
+            statusText.Padding = new Padding(8, 0, 8, 0);
             positionStatus = new ToolStripStatusLabel("Ln 1, Col 1");
+            positionStatus.Padding = new Padding(8, 0, 8, 0);
             encodingStatus = new ToolStripStatusLabel("UTF-8  LF");
-            status.Items.AddRange(new ToolStripItem[] { branch, diagnostics, statusText, positionStatus, encodingStatus });
+            encodingStatus.Padding = new Padding(8, 0, 8, 0);
+            status.Items.AddRange(new ToolStripItem[] { branch, errors, warnings, statusText, positionStatus, encodingStatus });
             Controls.Add(status);
         }
 
