@@ -59,6 +59,8 @@ namespace WorkbenchHost
         private TitleBarButton maxButton;
         private TitleBarButton closeButton;
         private bool resizing;
+        private bool customMaximized;
+        private Rectangle customRestoreBounds;
         private int resizeEdges;
         private Point resizeStartCursor;
         private Rectangle resizeStartBounds;
@@ -169,8 +171,9 @@ namespace WorkbenchHost
             }
             if (sessionState.Maximized)
             {
-                MaximizedBounds = Screen.FromPoint(new Point(Bounds.Left + Bounds.Width / 2, Bounds.Top + Bounds.Height / 2)).WorkingArea;
-                WindowState = FormWindowState.Maximized;
+                customRestoreBounds = Bounds;
+                Bounds = Screen.FromPoint(new Point(Bounds.Left + Bounds.Width / 2, Bounds.Top + Bounds.Height / 2)).WorkingArea;
+                customMaximized = true;
             }
             else Bounds = ClampToWorkingArea(Bounds);
             KeyPreview = true;
@@ -461,9 +464,19 @@ namespace WorkbenchHost
 
         private void ToggleMaximize()
         {
-            MaximizedBounds = Screen.FromControl(this).WorkingArea;
-            WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
-            if (WindowState == FormWindowState.Normal) Bounds = ClampToWorkingArea(Bounds);
+            if (customMaximized)
+            {
+                customMaximized = false;
+                Bounds = ClampToWorkingArea(customRestoreBounds);
+            }
+            else
+            {
+                customRestoreBounds = Bounds;
+                Bounds = Screen.FromControl(this).WorkingArea;
+                customMaximized = true;
+            }
+            UpdateMaximizeButton();
+            ResizeApplication();
         }
 
         private ToolStripMenuItem MenuItem(string text, EventHandler action, Keys shortcut)
@@ -926,7 +939,6 @@ namespace WorkbenchHost
             Move += delegate { if (!resizing) ResizeApplication(); };
             Resize += delegate
             {
-                if (WindowState == FormWindowState.Maximized) MaximizedBounds = Screen.FromControl(this).WorkingArea;
                 UpdateMaximizeButton();
                 if (!resizing) ResizeApplication();
             };
@@ -1012,7 +1024,7 @@ namespace WorkbenchHost
 
         private void BeginOutlineResize(int edges)
         {
-            if (resizing || WindowState != FormWindowState.Normal || edges == 0) return;
+            if (resizing || customMaximized || WindowState != FormWindowState.Normal || edges == 0) return;
             resizing = true;
             resizeEdges = edges;
             resizeStartCursor = Cursor.Position;
@@ -1073,7 +1085,7 @@ namespace WorkbenchHost
 
         public bool PreFilterMessage(ref Message m)
         {
-            if (m.Msg != 0x0201 || resizing || WindowState != FormWindowState.Normal) return false;
+            if (m.Msg != 0x0201 || resizing || customMaximized || WindowState != FormWindowState.Normal) return false;
             int edges = ResizeEdgesAt(Cursor.Position);
             if (edges == 0) return false;
             BeginOutlineResize(edges);
@@ -1096,7 +1108,7 @@ namespace WorkbenchHost
 
         private int ResizeEdgesAt(Point cursor)
         {
-            if (WindowState != FormWindowState.Normal || ClientSize.Width < 1 || ClientSize.Height < 1) return 0;
+            if (customMaximized || WindowState != FormWindowState.Normal || ClientSize.Width < 1 || ClientSize.Height < 1) return 0;
             Point point = PointToClient(cursor);
             const int band = 8;
             bool left = point.X < band;
@@ -1137,7 +1149,7 @@ namespace WorkbenchHost
         private void UpdateMaximizeButton()
         {
             if (maxButton != null)
-                maxButton.ButtonKind = WindowState == FormWindowState.Maximized ? TitleBarButton.Kind.Restore : TitleBarButton.Kind.Maximize;
+                maxButton.ButtonKind = customMaximized || WindowState == FormWindowState.Maximized ? TitleBarButton.Kind.Restore : TitleBarButton.Kind.Maximize;
         }
 
         protected override CreateParams CreateParams
@@ -1152,7 +1164,23 @@ namespace WorkbenchHost
 
         protected override void WndProc(ref Message m)
         {
-            if (m.Msg == 0x00A1 && WindowState == FormWindowState.Normal) // WM_NCLBUTTONDOWN
+            if (m.Msg == 0x0112) // WM_SYSCOMMAND
+            {
+                int command = m.WParam.ToInt32() & 0xFFF0;
+                if (command == 0xF030) // SC_MAXIMIZE
+                {
+                    ToggleMaximize();
+                    m.Result = IntPtr.Zero;
+                    return;
+                }
+                if (command == 0xF120 && customMaximized && WindowState != FormWindowState.Minimized) // SC_RESTORE
+                {
+                    ToggleMaximize();
+                    m.Result = IntPtr.Zero;
+                    return;
+                }
+            }
+            if (m.Msg == 0x00A1 && !customMaximized && WindowState == FormWindowState.Normal) // WM_NCLBUTTONDOWN
             {
                 int edges = ResizeEdgesFromHitTest(m.WParam.ToInt32());
                 if (edges != 0)
@@ -1168,7 +1196,7 @@ namespace WorkbenchHost
                 m.Result = IntPtr.Zero;
                 return;
             }
-            if (m.Msg == 0x0020 && WindowState == FormWindowState.Normal) // WM_SETCURSOR
+            if (m.Msg == 0x0020 && !customMaximized && WindowState == FormWindowState.Normal) // WM_SETCURSOR
             {
                 int edges = ResizeEdgesAt(Cursor.Position);
                 if (edges == 1 || edges == 2) Cursor.Current = Cursors.SizeWE;
@@ -1192,7 +1220,7 @@ namespace WorkbenchHost
                 if (IsHandleCreated) BeginInvoke((MethodInvoker)RepaintCustomChrome);
                 return;
             }
-            if (m.Msg == 0x0084 && WindowState == FormWindowState.Normal) // WM_NCHITTEST
+            if (m.Msg == 0x0084 && !customMaximized && WindowState == FormWindowState.Normal) // WM_NCHITTEST
             {
                 base.WndProc(ref m);
                 Point cursor = PointToClient(new Point((short)(m.LParam.ToInt64() & 0xffff), (short)((m.LParam.ToInt64() >> 16) & 0xffff)));
@@ -2139,12 +2167,12 @@ namespace WorkbenchHost
                 }
                 EditorDocument current = CurrentDocument();
                 sessionState.ActiveFile = current == null ? null : current.Path;
-                Rectangle bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+                Rectangle bounds = customMaximized ? customRestoreBounds : WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
                 sessionState.WindowX = bounds.X;
                 sessionState.WindowY = bounds.Y;
                 sessionState.WindowWidth = bounds.Width;
                 sessionState.WindowHeight = bounds.Height;
-                sessionState.Maximized = WindowState == FormWindowState.Maximized;
+                sessionState.Maximized = customMaximized || WindowState == FormWindowState.Maximized;
                 sessionState.Save();
             }
             catch (Exception ex)
