@@ -71,10 +71,10 @@ namespace WorkbenchHost
         private ToolStripMenuItem runButton;
         private ToolStripMenuItem grayscaleButton;
         private TrackBar opacitySlider;
-        private StatusStrip status;
-        private ToolStripStatusLabel statusText;
-        private ToolStripStatusLabel positionStatus;
-        private ToolStripStatusLabel encodingStatus;
+        private Panel status;
+        private Label statusText;
+        private Label positionStatus;
+        private Label encodingStatus;
         private SplitContainer contentSplit;
         private Label explorerTitle;
         private TreeView tree;
@@ -477,61 +477,104 @@ namespace WorkbenchHost
 
         private void BuildStatus()
         {
-            status = new StatusStrip();
+            status = new Panel();
             status.Dock = DockStyle.Bottom;
-            status.AutoSize = false;
             status.Height = 22;
             status.BackColor = VSCodeColors.StatusBar;
-            status.ForeColor = VSCodeColors.Text;
-            status.SizingGrip = false;
-            status.Padding = new Padding(4, 0, 4, 0);
-            status.GripMargin = new Padding(0);
             status.Font = new Font("Segoe UI", 9F);
-            status.Renderer = new VSCodeToolStripRenderer(VSCodeColors.StatusBar);
-            ToolStripStatusLabel branch = new ToolStripStatusLabel("main");
-            branch.Padding = new Padding(20, 0, 8, 0);
-            branch.Margin = new Padding(0);
-            branch.Paint += delegate(object sender, PaintEventArgs e)
+            status.Paint += delegate(object sender, PaintEventArgs e)
             {
-                IconPainter.DrawBranch(e.Graphics, new Rectangle(3, 3, 15, 15), VSCodeColors.Text);
+                using (Pen pen = new Pen(VSCodeColors.Border))
+                    e.Graphics.DrawLine(pen, 0, 0, status.ClientSize.Width, 0);
             };
-            ToolStripStatusLabel errors = new ToolStripStatusLabel("0");
-            errors.Padding = new Padding(19, 0, 6, 0);
-            errors.Margin = new Padding(0);
-            errors.Paint += delegate(object sender, PaintEventArgs e)
+
+            Panel left = new Panel();
+            left.Dock = DockStyle.Fill;
+            left.BackColor = VSCodeColors.StatusBar;
+            left.Paint += delegate(object sender, PaintEventArgs e)
             {
-                Rectangle icon = new Rectangle(4, 5, 12, 12);
+                IconPainter.DrawBranch(e.Graphics, new Rectangle(7, 4, 14, 14), VSCodeColors.Text);
+                Rectangle errorIcon = new Rectangle(72, 6, 10, 10);
                 using (Pen pen = new Pen(VSCodeColors.Text, 1.25F))
                 {
                     e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                    e.Graphics.DrawEllipse(pen, icon);
-                    e.Graphics.DrawLine(pen, icon.Left + 3, icon.Top + 3, icon.Right - 3, icon.Bottom - 3);
-                    e.Graphics.DrawLine(pen, icon.Right - 3, icon.Top + 3, icon.Left + 3, icon.Bottom - 3);
+                    e.Graphics.DrawEllipse(pen, errorIcon);
+                    e.Graphics.DrawLine(pen, errorIcon.Left + 3, errorIcon.Top + 3, errorIcon.Right - 3, errorIcon.Bottom - 3);
+                    e.Graphics.DrawLine(pen, errorIcon.Right - 3, errorIcon.Top + 3, errorIcon.Left + 3, errorIcon.Bottom - 3);
                 }
-            };
-            ToolStripStatusLabel warnings = new ToolStripStatusLabel("0");
-            warnings.Padding = new Padding(19, 0, 8, 0);
-            warnings.Margin = new Padding(0);
-            warnings.Paint += delegate(object sender, PaintEventArgs e)
-            {
-                Point[] triangle = { new Point(10, 4), new Point(16, 16), new Point(4, 16) };
+                Point[] triangle = { new Point(112, 5), new Point(118, 16), new Point(106, 16) };
                 using (Pen pen = new Pen(VSCodeColors.Text, 1.25F)) e.Graphics.DrawPolygon(pen, triangle);
                 using (SolidBrush brush = new SolidBrush(VSCodeColors.Text))
                 {
-                    e.Graphics.FillRectangle(brush, 9, 8, 2, 4);
-                    e.Graphics.FillRectangle(brush, 9, 14, 2, 2);
+                    e.Graphics.FillRectangle(brush, 111, 9, 2, 4);
+                    e.Graphics.FillRectangle(brush, 111, 14, 2, 2);
                 }
             };
-            statusText = new ToolStripStatusLabel("Ready");
-            statusText.Spring = true;
+
+            Label branch = StatusLabel("main");
+            branch.Location = new Point(25, 0);
+            branch.Size = new Size(42, 22);
+            Label errors = StatusLabel("0");
+            errors.Location = new Point(85, 0);
+            errors.Size = new Size(18, 22);
+            Label warnings = StatusLabel("0");
+            warnings.Location = new Point(121, 0);
+            warnings.Size = new Size(18, 22);
+            left.Controls.AddRange(new Control[] { branch, errors, warnings });
+
+            statusText = StatusLabel("Ready");
+            statusText.Dock = DockStyle.Fill;
             statusText.TextAlign = ContentAlignment.MiddleLeft;
             statusText.Padding = new Padding(8, 0, 8, 0);
-            positionStatus = new ToolStripStatusLabel("Ln 1, Col 1");
+            statusText.AutoEllipsis = true;
+
+            FlowLayoutPanel right = new FlowLayoutPanel();
+            right.Dock = DockStyle.Fill;
+            right.AutoSize = true;
+            right.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            right.WrapContents = false;
+            right.FlowDirection = FlowDirection.LeftToRight;
+            right.BackColor = VSCodeColors.StatusBar;
+            right.Margin = new Padding(0);
+            right.Padding = new Padding(0);
+            positionStatus = StatusLabel("Ln 1, Col 1");
+            positionStatus.AutoSize = true;
             positionStatus.Padding = new Padding(8, 0, 8, 0);
-            encodingStatus = new ToolStripStatusLabel("UTF-8  LF");
+            positionStatus.Margin = new Padding(0);
+            encodingStatus = StatusLabel("UTF-8  LF");
+            encodingStatus.AutoSize = true;
             encodingStatus.Padding = new Padding(8, 0, 8, 0);
-            status.Items.AddRange(new ToolStripItem[] { branch, errors, warnings, statusText, positionStatus, encodingStatus });
+            encodingStatus.Margin = new Padding(0);
+            right.Controls.Add(positionStatus);
+            right.Controls.Add(encodingStatus);
+
+            TableLayoutPanel layout = new TableLayoutPanel();
+            layout.Dock = DockStyle.Fill;
+            layout.Margin = new Padding(0);
+            layout.Padding = new Padding(0);
+            layout.ColumnCount = 3;
+            layout.RowCount = 1;
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 148));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.Controls.Add(left, 0, 0);
+            layout.Controls.Add(statusText, 1, 0);
+            layout.Controls.Add(right, 2, 0);
+            status.Controls.Add(layout);
             Controls.Add(status);
+        }
+
+        private Label StatusLabel(string text)
+        {
+            Label label = new Label();
+            label.Text = text;
+            label.BackColor = VSCodeColors.StatusBar;
+            label.ForeColor = VSCodeColors.Text;
+            label.Font = status.Font;
+            label.TextAlign = ContentAlignment.MiddleLeft;
+            label.Margin = new Padding(0);
+            return label;
         }
 
         private void BuildWorkspace()
