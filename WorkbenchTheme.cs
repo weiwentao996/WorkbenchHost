@@ -176,6 +176,84 @@ namespace WorkbenchHost
         }
     }
 
+    internal sealed class StatusBarItem : Control
+    {
+        internal enum Kind
+        {
+            None,
+            Branch,
+            Error,
+            Warning
+        }
+
+        private readonly Kind kind;
+
+        internal StatusBarItem(Kind kind, string text)
+        {
+            this.kind = kind;
+            Text = text;
+            AutoSize = true;
+            Height = 22;
+            BackColor = VSCodeColors.StatusBar;
+            ForeColor = VSCodeColors.Text;
+            Font = new Font("Segoe UI", 9F);
+            Margin = new Padding(0);
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer, true);
+        }
+
+        public override Size GetPreferredSize(Size proposedSize)
+        {
+            Size text = TextRenderer.MeasureText(Text ?? String.Empty, Font, Size.Empty,
+                TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+            int iconWidth = kind == Kind.None ? 0 : 18;
+            return new Size(12 + iconWidth + text.Width, 22);
+        }
+
+        protected override void OnTextChanged(System.EventArgs e)
+        {
+            base.OnTextChanged(e);
+            if (Parent != null) Parent.PerformLayout();
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor);
+            int textX = 6;
+            if (kind != Kind.None)
+            {
+                Rectangle icon = new Rectangle(6, 4, 14, 14);
+                if (kind == Kind.Branch) IconPainter.DrawBranch(e.Graphics, icon, ForeColor);
+                else if (kind == Kind.Error)
+                {
+                    Rectangle circle = new Rectangle(icon.X + 2, icon.Y + 2, 10, 10);
+                    using (Pen pen = new Pen(ForeColor, 1.25F))
+                    {
+                        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                        e.Graphics.DrawEllipse(pen, circle);
+                        e.Graphics.DrawLine(pen, circle.Left + 3, circle.Top + 3, circle.Right - 3, circle.Bottom - 3);
+                        e.Graphics.DrawLine(pen, circle.Right - 3, circle.Top + 3, circle.Left + 3, circle.Bottom - 3);
+                    }
+                }
+                else if (kind == Kind.Warning)
+                {
+                    Point[] triangle = { new Point(icon.Left + 7, icon.Top + 1), new Point(icon.Right - 1, icon.Bottom - 1), new Point(icon.Left + 1, icon.Bottom - 1) };
+                    using (Pen pen = new Pen(ForeColor, 1.25F)) e.Graphics.DrawPolygon(pen, triangle);
+                    using (SolidBrush brush = new SolidBrush(ForeColor))
+                    {
+                        e.Graphics.FillRectangle(brush, icon.Left + 6, icon.Top + 6, 2, 4);
+                        e.Graphics.FillRectangle(brush, icon.Left + 6, icon.Top + 12, 2, 2);
+                    }
+                }
+                textX = 24;
+            }
+            TextRenderer.DrawText(e.Graphics, Text ?? String.Empty, Font,
+                new Rectangle(textX, 0, Math.Max(0, Width - textX - 6), Height), ForeColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+        }
+    }
+
     // ------------------------------------------------------------------
     // Flat title bar window buttons (minimize / maximize / close).
     // ------------------------------------------------------------------

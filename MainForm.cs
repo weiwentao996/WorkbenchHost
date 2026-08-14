@@ -58,8 +58,13 @@ namespace WorkbenchHost
         private TitleBarButton minButton;
         private TitleBarButton maxButton;
         private TitleBarButton closeButton;
+        private Panel resizeLeftGrip;
         private Panel resizeRightGrip;
+        private Panel resizeTopGrip;
         private Panel resizeBottomGrip;
+        private Panel resizeTopLeftGrip;
+        private Panel resizeTopRightGrip;
+        private Panel resizeBottomLeftGrip;
         private Panel resizeCornerGrip;
         private bool resizing;
         private int resizeEdges;
@@ -73,8 +78,8 @@ namespace WorkbenchHost
         private TrackBar opacitySlider;
         private Panel status;
         private Label statusText;
-        private Label positionStatus;
-        private Label encodingStatus;
+        private StatusBarItem positionStatus;
+        private StatusBarItem encodingStatus;
         private SplitContainer contentSplit;
         private Label explorerTitle;
         private TreeView tree;
@@ -488,39 +493,18 @@ namespace WorkbenchHost
                     e.Graphics.DrawLine(pen, 0, 0, status.ClientSize.Width, 0);
             };
 
-            Panel left = new Panel();
+            FlowLayoutPanel left = new FlowLayoutPanel();
             left.Dock = DockStyle.Fill;
+            left.AutoSize = true;
+            left.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            left.WrapContents = false;
+            left.FlowDirection = FlowDirection.LeftToRight;
             left.BackColor = VSCodeColors.StatusBar;
-            left.Paint += delegate(object sender, PaintEventArgs e)
-            {
-                IconPainter.DrawBranch(e.Graphics, new Rectangle(7, 4, 14, 14), VSCodeColors.Text);
-                Rectangle errorIcon = new Rectangle(72, 6, 10, 10);
-                using (Pen pen = new Pen(VSCodeColors.Text, 1.25F))
-                {
-                    e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                    e.Graphics.DrawEllipse(pen, errorIcon);
-                    e.Graphics.DrawLine(pen, errorIcon.Left + 3, errorIcon.Top + 3, errorIcon.Right - 3, errorIcon.Bottom - 3);
-                    e.Graphics.DrawLine(pen, errorIcon.Right - 3, errorIcon.Top + 3, errorIcon.Left + 3, errorIcon.Bottom - 3);
-                }
-                Point[] triangle = { new Point(112, 5), new Point(118, 16), new Point(106, 16) };
-                using (Pen pen = new Pen(VSCodeColors.Text, 1.25F)) e.Graphics.DrawPolygon(pen, triangle);
-                using (SolidBrush brush = new SolidBrush(VSCodeColors.Text))
-                {
-                    e.Graphics.FillRectangle(brush, 111, 9, 2, 4);
-                    e.Graphics.FillRectangle(brush, 111, 14, 2, 2);
-                }
-            };
-
-            Label branch = StatusLabel("main");
-            branch.Location = new Point(25, 0);
-            branch.Size = new Size(42, 22);
-            Label errors = StatusLabel("0");
-            errors.Location = new Point(85, 0);
-            errors.Size = new Size(18, 22);
-            Label warnings = StatusLabel("0");
-            warnings.Location = new Point(121, 0);
-            warnings.Size = new Size(18, 22);
-            left.Controls.AddRange(new Control[] { branch, errors, warnings });
+            left.Margin = new Padding(0);
+            left.Padding = new Padding(0);
+            left.Controls.Add(new StatusBarItem(StatusBarItem.Kind.Branch, "main"));
+            left.Controls.Add(new StatusBarItem(StatusBarItem.Kind.Error, "0"));
+            left.Controls.Add(new StatusBarItem(StatusBarItem.Kind.Warning, "0"));
 
             statusText = StatusLabel("Ready");
             statusText.Dock = DockStyle.Fill;
@@ -537,14 +521,8 @@ namespace WorkbenchHost
             right.BackColor = VSCodeColors.StatusBar;
             right.Margin = new Padding(0);
             right.Padding = new Padding(0);
-            positionStatus = StatusLabel("Ln 1, Col 1");
-            positionStatus.AutoSize = true;
-            positionStatus.Padding = new Padding(8, 0, 8, 0);
-            positionStatus.Margin = new Padding(0);
-            encodingStatus = StatusLabel("UTF-8  LF");
-            encodingStatus.AutoSize = true;
-            encodingStatus.Padding = new Padding(8, 0, 8, 0);
-            encodingStatus.Margin = new Padding(0);
+            positionStatus = new StatusBarItem(StatusBarItem.Kind.None, "Ln 1, Col 1");
+            encodingStatus = new StatusBarItem(StatusBarItem.Kind.None, "UTF-8  LF");
             right.Controls.Add(positionStatus);
             right.Controls.Add(encodingStatus);
 
@@ -554,7 +532,7 @@ namespace WorkbenchHost
             layout.Padding = new Padding(0);
             layout.ColumnCount = 3;
             layout.RowCount = 1;
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 148));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -1041,12 +1019,19 @@ namespace WorkbenchHost
 
         private void BuildResizeGrips()
         {
+            resizeLeftGrip = CreateResizeGrip(Cursors.SizeWE, 1);
             resizeRightGrip = CreateResizeGrip(Cursors.SizeWE, 2);
-            resizeBottomGrip = CreateResizeGrip(Cursors.SizeNS, 4);
-            resizeCornerGrip = CreateResizeGrip(Cursors.SizeNWSE, 6);
-            Controls.Add(resizeRightGrip);
-            Controls.Add(resizeBottomGrip);
-            Controls.Add(resizeCornerGrip);
+            resizeTopGrip = CreateResizeGrip(Cursors.SizeNS, 4);
+            resizeBottomGrip = CreateResizeGrip(Cursors.SizeNS, 8);
+            resizeTopLeftGrip = CreateResizeGrip(Cursors.SizeNWSE, 5);
+            resizeTopRightGrip = CreateResizeGrip(Cursors.SizeNESW, 6);
+            resizeBottomLeftGrip = CreateResizeGrip(Cursors.SizeNESW, 9);
+            resizeCornerGrip = CreateResizeGrip(Cursors.SizeNWSE, 10);
+            Controls.AddRange(new Control[]
+            {
+                resizeLeftGrip, resizeRightGrip, resizeTopGrip, resizeBottomGrip,
+                resizeTopLeftGrip, resizeTopRightGrip, resizeBottomLeftGrip, resizeCornerGrip
+            });
             Resize += delegate { PositionResizeGrips(); };
             PositionResizeGrips();
         }
@@ -1066,14 +1051,23 @@ namespace WorkbenchHost
 
         private void PositionResizeGrips()
         {
-            if (resizeRightGrip == null || IsDisposed) return;
+            if (resizeLeftGrip == null || IsDisposed) return;
             int band = 8;
+            int width = ClientSize.Width;
+            int height = ClientSize.Height;
+            resizeLeftGrip.Bounds = new Rectangle(0, band, band, Math.Max(0, height - band * 2));
             resizeRightGrip.Bounds = new Rectangle(Math.Max(0, ClientSize.Width - band), band, band, Math.Max(0, ClientSize.Height - band * 2));
+            resizeTopGrip.Bounds = new Rectangle(band, 0, Math.Max(0, width - band * 2), band);
             resizeBottomGrip.Bounds = new Rectangle(band, Math.Max(0, ClientSize.Height - band), Math.Max(0, ClientSize.Width - band * 2), band);
+            resizeTopLeftGrip.Bounds = new Rectangle(0, 0, band, band);
+            resizeTopRightGrip.Bounds = new Rectangle(Math.Max(0, width - band), 0, band, band);
+            resizeBottomLeftGrip.Bounds = new Rectangle(0, Math.Max(0, height - band), band, band);
             resizeCornerGrip.Bounds = new Rectangle(Math.Max(0, ClientSize.Width - band), Math.Max(0, ClientSize.Height - band), band, band);
-            resizeRightGrip.BringToFront();
-            resizeBottomGrip.BringToFront();
-            resizeCornerGrip.BringToFront();
+            foreach (Control grip in new Control[]
+            {
+                resizeLeftGrip, resizeRightGrip, resizeTopGrip, resizeBottomGrip,
+                resizeTopLeftGrip, resizeTopRightGrip, resizeBottomLeftGrip, resizeCornerGrip
+            }) grip.BringToFront();
         }
 
         private void ResizeGripMouseDown(object sender, MouseEventArgs e)
@@ -1100,10 +1094,20 @@ namespace WorkbenchHost
             int dx = cursor.X - resizeStartCursor.X;
             int dy = cursor.Y - resizeStartCursor.Y;
             Rectangle next = resizeStartBounds;
-            if ((resizeEdges & 2) != 0) next.Width = resizeStartBounds.Width + dx;
-            if ((resizeEdges & 4) != 0) next.Height = resizeStartBounds.Height + dy;
-            next.Width = Math.Max(MinimumSize.Width, next.Width);
-            next.Height = Math.Max(MinimumSize.Height, next.Height);
+            if ((resizeEdges & 1) != 0)
+            {
+                next.X = Math.Min(resizeStartBounds.Left + dx, resizeStartBounds.Right - MinimumSize.Width);
+                next.Width = resizeStartBounds.Right - next.X;
+            }
+            else if ((resizeEdges & 2) != 0)
+                next.Width = Math.Max(MinimumSize.Width, resizeStartBounds.Width + dx);
+            if ((resizeEdges & 4) != 0)
+            {
+                next.Y = Math.Min(resizeStartBounds.Top + dy, resizeStartBounds.Bottom - MinimumSize.Height);
+                next.Height = resizeStartBounds.Bottom - next.Y;
+            }
+            else if ((resizeEdges & 8) != 0)
+                next.Height = Math.Max(MinimumSize.Height, resizeStartBounds.Height + dy);
             if (next == resizePreviewBounds) return;
             EraseResizePreview();
             resizePreviewBounds = next;
@@ -1148,11 +1152,18 @@ namespace WorkbenchHost
             if (WindowState != FormWindowState.Normal || ClientSize.Width < 1 || ClientSize.Height < 1) return 0;
             Point point = PointToClient(cursor);
             const int band = 8;
+            bool left = point.X < band;
             bool right = point.X >= ClientSize.Width - band;
+            bool top = point.Y < band;
             bool bottom = point.Y >= ClientSize.Height - band;
-            if (right && bottom) return 6;
+            if (left && top) return 5;
+            if (right && top) return 6;
+            if (left && bottom) return 9;
+            if (right && bottom) return 10;
+            if (left) return 1;
             if (right && point.Y >= band) return 2;
-            if (bottom && point.X >= band) return 4;
+            if (top) return 4;
+            if (bottom && point.X >= band) return 8;
             return 0;
         }
 
@@ -1184,9 +1195,10 @@ namespace WorkbenchHost
             if (m.Msg == 0x0020 && WindowState == FormWindowState.Normal) // WM_SETCURSOR
             {
                 int edges = ResizeEdgesAt(Cursor.Position);
-                if (edges == 2) Cursor.Current = Cursors.SizeWE;
-                else if (edges == 4) Cursor.Current = Cursors.SizeNS;
-                else if (edges == 6) Cursor.Current = Cursors.SizeNWSE;
+                if (edges == 1 || edges == 2) Cursor.Current = Cursors.SizeWE;
+                else if (edges == 4 || edges == 8) Cursor.Current = Cursors.SizeNS;
+                else if (edges == 5 || edges == 10) Cursor.Current = Cursors.SizeNWSE;
+                else if (edges == 6 || edges == 9) Cursor.Current = Cursors.SizeNESW;
                 if (edges != 0)
                 {
                     m.Result = new IntPtr(1);
@@ -1208,44 +1220,11 @@ namespace WorkbenchHost
             {
                 base.WndProc(ref m);
                 Point cursor = PointToClient(new Point((short)(m.LParam.ToInt64() & 0xffff), (short)((m.LParam.ToInt64() >> 16) & 0xffff)));
-                const int grip = 8;
-                bool left = cursor.X < grip;
-                bool right = cursor.X >= ClientSize.Width - grip;
-                bool top = cursor.Y < grip;
-                bool bottom = cursor.Y >= ClientSize.Height - grip;
-                if (left && top) m.Result = new IntPtr(13);       // HTTOPLEFT
-                else if (right && top) m.Result = new IntPtr(14); // HTTOPRIGHT
-                else if (left && bottom) m.Result = new IntPtr(16); // HTBOTTOMLEFT
-                else if (right && bottom) m.Result = new IntPtr(17); // HTBOTTOMRIGHT
-                else if (left) m.Result = new IntPtr(10);         // HTLEFT
-                else if (right) m.Result = new IntPtr(11);        // HTRIGHT
-                else if (top) m.Result = new IntPtr(12);          // HTTOP
-                else if (bottom) m.Result = new IntPtr(15);       // HTBOTTOM
+                const int band = 8;
+                if (cursor.X < band || cursor.X >= ClientSize.Width - band ||
+                    cursor.Y < band || cursor.Y >= ClientSize.Height - band)
+                    m.Result = new IntPtr(1); // HTCLIENT: the custom resize grips own all four edges
                 return;
-            }
-            if (m.Msg == 0x0201 && WindowState == FormWindowState.Normal) // WM_LBUTTONDOWN fallback for borderless resize
-            {
-                Point cursor = PointToClient(Cursor.Position);
-                const int grip = 8;
-                bool left = cursor.X < grip;
-                bool right = cursor.X >= ClientSize.Width - grip;
-                bool top = cursor.Y < grip;
-                bool bottom = cursor.Y >= ClientSize.Height - grip;
-                int sizingEdge = 0;
-                if (left && top) sizingEdge = 4;          // WMSZ_TOPLEFT
-                else if (right && top) sizingEdge = 5;   // WMSZ_TOPRIGHT
-                else if (left && bottom) sizingEdge = 7; // WMSZ_BOTTOMLEFT
-                else if (right && bottom) sizingEdge = 8;// WMSZ_BOTTOMRIGHT
-                else if (left) sizingEdge = 1;            // WMSZ_LEFT
-                else if (right) sizingEdge = 2;           // WMSZ_RIGHT
-                else if (top) sizingEdge = 3;             // WMSZ_TOP
-                else if (bottom) sizingEdge = 6;          // WMSZ_BOTTOM
-                if (sizingEdge != 0)
-                {
-                    NativeMethods.ReleaseCapture();
-                    NativeMethods.SendMessage(Handle, 0x0112, new IntPtr(0xF000 | sizingEdge), IntPtr.Zero); // WM_SYSCOMMAND/SC_SIZE
-                    return;
-                }
             }
             if (m.Msg == 0x0083) // WM_NCCALCSIZE: remove the standard border while keeping resize support
             {
