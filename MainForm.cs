@@ -10,7 +10,7 @@ using System.Windows.Forms;
 
 namespace WorkbenchHost
 {
-    internal sealed class MainForm : Form
+    internal sealed class MainForm : Form, IMessageFilter
     {
         private sealed class NodeTarget
         {
@@ -58,20 +58,13 @@ namespace WorkbenchHost
         private TitleBarButton minButton;
         private TitleBarButton maxButton;
         private TitleBarButton closeButton;
-        private Panel resizeLeftGrip;
-        private Panel resizeRightGrip;
-        private Panel resizeTopGrip;
-        private Panel resizeBottomGrip;
-        private Panel resizeTopLeftGrip;
-        private Panel resizeTopRightGrip;
-        private Panel resizeBottomLeftGrip;
-        private Panel resizeCornerGrip;
         private bool resizing;
         private int resizeEdges;
         private Point resizeStartCursor;
         private Rectangle resizeStartBounds;
         private Rectangle resizePreviewBounds;
         private bool resizePreviewVisible;
+        private System.Windows.Forms.Timer resizeTimer;
         private ToolStripLabel opacityLabel;
         private ToolStripMenuItem runButton;
         private ToolStripMenuItem grayscaleButton;
@@ -137,6 +130,7 @@ namespace WorkbenchHost
             BuildStatus();
             BuildWorkspace();
             BuildEvents();
+            Application.AddMessageFilter(this);
             Controls.SetChildIndex(titleBar, Controls.Count - 1);
             RestoreSession();
             WriteOutput(profile == null ? "Host initialized in editor-only mode." : "Host initialized with profile: " + profile.Id);
@@ -1014,81 +1008,33 @@ namespace WorkbenchHost
             Activated += delegate { RepaintCustomChrome(); };
             Deactivate += delegate { RepaintCustomChrome(); };
             FormClosing += MainFormClosing;
-            BuildResizeGrips();
         }
 
-        private void BuildResizeGrips()
+        private void BeginOutlineResize(int edges)
         {
-            resizeLeftGrip = CreateResizeGrip(Cursors.SizeWE, 1);
-            resizeRightGrip = CreateResizeGrip(Cursors.SizeWE, 2);
-            resizeTopGrip = CreateResizeGrip(Cursors.SizeNS, 4);
-            resizeBottomGrip = CreateResizeGrip(Cursors.SizeNS, 8);
-            resizeTopLeftGrip = CreateResizeGrip(Cursors.SizeNWSE, 5);
-            resizeTopRightGrip = CreateResizeGrip(Cursors.SizeNESW, 6);
-            resizeBottomLeftGrip = CreateResizeGrip(Cursors.SizeNESW, 9);
-            resizeCornerGrip = CreateResizeGrip(Cursors.SizeNWSE, 10);
-            Controls.AddRange(new Control[]
-            {
-                resizeLeftGrip, resizeRightGrip, resizeTopGrip, resizeBottomGrip,
-                resizeTopLeftGrip, resizeTopRightGrip, resizeBottomLeftGrip, resizeCornerGrip
-            });
-            Resize += delegate { PositionResizeGrips(); };
-            PositionResizeGrips();
-        }
-
-        private Panel CreateResizeGrip(Cursor cursor, int edges)
-        {
-            Panel grip = new Panel();
-            grip.BackColor = Color.Transparent;
-            grip.Cursor = cursor;
-            grip.Tag = edges;
-            grip.MouseDown += ResizeGripMouseDown;
-            grip.MouseMove += ResizeGripMouseMove;
-            grip.MouseUp += ResizeGripMouseUp;
-            grip.MouseCaptureChanged += ResizeGripMouseCaptureChanged;
-            return grip;
-        }
-
-        private void PositionResizeGrips()
-        {
-            if (resizeLeftGrip == null || IsDisposed) return;
-            int band = 8;
-            int width = ClientSize.Width;
-            int height = ClientSize.Height;
-            resizeLeftGrip.Bounds = new Rectangle(0, band, band, Math.Max(0, height - band * 2));
-            resizeRightGrip.Bounds = new Rectangle(Math.Max(0, ClientSize.Width - band), band, band, Math.Max(0, ClientSize.Height - band * 2));
-            resizeTopGrip.Bounds = new Rectangle(band, 0, Math.Max(0, width - band * 2), band);
-            resizeBottomGrip.Bounds = new Rectangle(band, Math.Max(0, ClientSize.Height - band), Math.Max(0, ClientSize.Width - band * 2), band);
-            resizeTopLeftGrip.Bounds = new Rectangle(0, 0, band, band);
-            resizeTopRightGrip.Bounds = new Rectangle(Math.Max(0, width - band), 0, band, band);
-            resizeBottomLeftGrip.Bounds = new Rectangle(0, Math.Max(0, height - band), band, band);
-            resizeCornerGrip.Bounds = new Rectangle(Math.Max(0, ClientSize.Width - band), Math.Max(0, ClientSize.Height - band), band, band);
-            foreach (Control grip in new Control[]
-            {
-                resizeLeftGrip, resizeRightGrip, resizeTopGrip, resizeBottomGrip,
-                resizeTopLeftGrip, resizeTopRightGrip, resizeBottomLeftGrip, resizeCornerGrip
-            }) grip.BringToFront();
-        }
-
-        private void ResizeGripMouseDown(object sender, MouseEventArgs e)
-        {
-            if (e.Button != MouseButtons.Left || WindowState != FormWindowState.Normal) return;
+            if (resizing || WindowState != FormWindowState.Normal || edges == 0) return;
             resizing = true;
-            resizeEdges = (int)((Control)sender).Tag;
+            resizeEdges = edges;
             resizeStartCursor = Cursor.Position;
             resizeStartBounds = Bounds;
             resizePreviewBounds = resizeStartBounds;
             DrawResizePreview();
-            ((Control)sender).Capture = true;
+            if (resizeTimer == null)
+            {
+                resizeTimer = new System.Windows.Forms.Timer();
+                resizeTimer.Interval = 16;
+                resizeTimer.Tick += delegate
+                {
+                    if (!resizing) return;
+                    if ((NativeMethods.GetAsyncKeyState(0x01) & 0x8000) != 0) UpdateOutlineResize();
+                    else EndOutlineResize(true);
+                };
+            }
+            resizeTimer.Start();
         }
 
-        private void ResizeGripMouseMove(object sender, MouseEventArgs e)
+        private void UpdateOutlineResize()
         {
-            if (!resizing)
-            {
-                Cursor.Current = ((Control)sender).Cursor;
-                return;
-            }
             if (!resizing) return;
             Point cursor = Cursor.Position;
             int dx = cursor.X - resizeStartCursor.X;
@@ -1114,23 +1060,24 @@ namespace WorkbenchHost
             DrawResizePreview();
         }
 
-        private void ResizeGripMouseUp(object sender, MouseEventArgs e)
+        private void EndOutlineResize(bool apply)
         {
-            if (e.Button != MouseButtons.Left) return;
             Rectangle finalBounds = resizePreviewBounds;
             EraseResizePreview();
             resizing = false;
-            ((Control)sender).Capture = false;
+            if (resizeTimer != null) resizeTimer.Stop();
+            if (!apply) return;
             Bounds = finalBounds;
             SaveSessionState();
         }
 
-        private void ResizeGripMouseCaptureChanged(object sender, EventArgs e)
+        public bool PreFilterMessage(ref Message m)
         {
-            Control grip = (Control)sender;
-            if (!resizing || grip.Capture) return;
-            EraseResizePreview();
-            resizing = false;
+            if (m.Msg != 0x0201 || resizing || WindowState != FormWindowState.Normal) return false;
+            int edges = ResizeEdgesAt(Cursor.Position);
+            if (edges == 0) return false;
+            BeginOutlineResize(edges);
+            return true;
         }
 
         private void DrawResizePreview()
@@ -1167,6 +1114,19 @@ namespace WorkbenchHost
             return 0;
         }
 
+        private static int ResizeEdgesFromHitTest(int hitTest)
+        {
+            if (hitTest == 10) return 1;  // HTLEFT
+            if (hitTest == 11) return 2;  // HTRIGHT
+            if (hitTest == 12) return 4;  // HTTOP
+            if (hitTest == 13) return 5;  // HTTOPLEFT
+            if (hitTest == 14) return 6;  // HTTOPRIGHT
+            if (hitTest == 15) return 8;  // HTBOTTOM
+            if (hitTest == 16) return 9;  // HTBOTTOMLEFT
+            if (hitTest == 17) return 10; // HTBOTTOMRIGHT
+            return 0;
+        }
+
         private void RepaintCustomChrome()
         {
             if (titleBar == null || titleBar.IsDisposed) return;
@@ -1192,6 +1152,22 @@ namespace WorkbenchHost
 
         protected override void WndProc(ref Message m)
         {
+            if (m.Msg == 0x00A1 && WindowState == FormWindowState.Normal) // WM_NCLBUTTONDOWN
+            {
+                int edges = ResizeEdgesFromHitTest(m.WParam.ToInt32());
+                if (edges != 0)
+                {
+                    BeginOutlineResize(edges);
+                    m.Result = IntPtr.Zero;
+                    return;
+                }
+            }
+            if (m.Msg == 0x001F && resizing) // WM_CANCELMODE
+            {
+                EndOutlineResize(false);
+                m.Result = IntPtr.Zero;
+                return;
+            }
             if (m.Msg == 0x0020 && WindowState == FormWindowState.Normal) // WM_SETCURSOR
             {
                 int edges = ResizeEdgesAt(Cursor.Position);
@@ -1221,9 +1197,18 @@ namespace WorkbenchHost
                 base.WndProc(ref m);
                 Point cursor = PointToClient(new Point((short)(m.LParam.ToInt64() & 0xffff), (short)((m.LParam.ToInt64() >> 16) & 0xffff)));
                 const int band = 8;
-                if (cursor.X < band || cursor.X >= ClientSize.Width - band ||
-                    cursor.Y < band || cursor.Y >= ClientSize.Height - band)
-                    m.Result = new IntPtr(1); // HTCLIENT: the custom resize grips own all four edges
+                bool left = cursor.X < band;
+                bool right = cursor.X >= ClientSize.Width - band;
+                bool top = cursor.Y < band;
+                bool bottom = cursor.Y >= ClientSize.Height - band;
+                if (left && top) m.Result = new IntPtr(13);
+                else if (right && top) m.Result = new IntPtr(14);
+                else if (left && bottom) m.Result = new IntPtr(16);
+                else if (right && bottom) m.Result = new IntPtr(17);
+                else if (left) m.Result = new IntPtr(10);
+                else if (right) m.Result = new IntPtr(11);
+                else if (top) m.Result = new IntPtr(12);
+                else if (bottom) m.Result = new IntPtr(15);
                 return;
             }
             if (m.Msg == 0x0083) // WM_NCCALCSIZE: remove the standard border while keeping resize support
@@ -2113,6 +2098,9 @@ namespace WorkbenchHost
 
         private void MainFormClosing(object sender, FormClosingEventArgs e)
         {
+            Application.RemoveMessageFilter(this);
+            if (resizing) EndOutlineResize(false);
+            if (resizeTimer != null) resizeTimer.Stop();
             watchTimer.Stop();
             grayscaleApplied = false;
             NativeMethods.ShutdownMagnification();
